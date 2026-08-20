@@ -1,0 +1,38 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mend
+  namespace: mend
+  labels:
+    app: mend
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`mend.inevitable.fyi`)"
+      kind: Rule
+      services:
+        - name: mend
+          port: 80
+  tls:
+    secretName: mend-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: mend-http
+  namespace: mend
+  labels:
+    app: mend
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`mend.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: mend
+          port: 80

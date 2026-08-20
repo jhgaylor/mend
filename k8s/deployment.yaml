@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mend
+  namespace: mend
+  labels:
+    app: mend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mend
+  template:
+    metadata:
+      labels:
+        app: mend
+    spec:
+      containers:
+        - name: web
+          # Pinned to an immutable sha tag by .github/workflows/build.yml.
+          image: ghcr.io/jhgaylor/mend:sha-0000000000000000000000000000000000000000
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 96Mi }
+            limits: { memory: 256Mi }
