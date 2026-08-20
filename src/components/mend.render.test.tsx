@@ -46,15 +46,21 @@ describe("Report", () => {
   test("leads with chant: the tool, the breadth, and how to run it yourself", () => {
     expect(html).toContain("chant");
     expect(html).toContain("read 12 files");
-    expect(html).toContain("2 of its rule catalogs"); // GHA + DKRD fired
+    expect(html).toContain("with all 10 rule catalogs — 2 had something to say");
     expect(html).toContain("run this yourself");
   });
 
-  test("names the rule catalogs that actually fired, with counts", () => {
-    expect(html).toContain("GitHub Actions");
-    expect(html).toContain("GHA");
-    expect(html).toContain("Docker");
-    expect(html).toContain("DKRD");
+  test("shows every catalog chant ran, not only the ones that spoke", () => {
+    for (const name of ["GitHub Actions", "GitLab CI", "Forgejo Actions", "Kubernetes", "Docker", "CloudFormation", "Azure ARM", "Google Cloud", "Helm", "Fountain"]) {
+      expect(html).toContain(name);
+    }
+    expect(html.match(/class="ruleset /g) ?? []).toHaveLength(10);
+  });
+
+  test("the two that found something are marked apart from the eight that did not", () => {
+    expect(html.match(/class="ruleset spoke"/g) ?? []).toHaveLength(2);
+    expect(html.match(/class="ruleset quiet"/g) ?? []).toHaveLength(8);
+    expect(html).toContain("chant ran its WHM* rules and found nothing");
   });
 
   test("tier counts, provenance and the scanned file count", () => {

@@ -7,7 +7,7 @@ import { useState } from "react";
 import { copyText } from "../lib/download";
 import { fileUrl, type RepoRef } from "../lib/hosts";
 import { arrangeReport, ruleDocUrl, type AuditReport, type Finding } from "../lib/protocol";
-import { rulesetsIn } from "../lib/rulesets";
+import { coverage } from "../lib/rulesets";
 import { LOCAL_AUDIT_COMMAND } from "../lib/spec";
 
 export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () => void; mendLabel?: string; mendDisabled?: boolean }) {
@@ -18,7 +18,8 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
   const [openHygiene, setOpenHygiene] = useState(false);
   const [openHow, setOpenHow] = useState(false);
   const [copied, setCopied] = useState(false);
-  const rulesets = rulesetsIn(report.findings);
+  const catalogs = coverage(report.findings);
+  const spoke = catalogs.filter((c) => c.count > 0).length;
 
   return (
     <section className="report">
@@ -28,7 +29,7 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
         </span>
         <span className="fineprint">
           {report.scanned !== undefined ? `read ${report.scanned} files` : "read this repo"}
-          {rulesets.length > 0 && ` with ${rulesets.length} of its rule ${rulesets.length === 1 ? "catalog" : "catalogs"}`}
+          {` with all ${catalogs.length} rule catalogs — ${spoke === 0 ? "none had anything to say" : `${spoke} had something to say`}`}
         </span>
         <button className="linkish" onClick={() => setOpenHow((v) => !v)}>
           run this yourself
@@ -60,17 +61,23 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
         </div>
       )}
 
-      {rulesets.length > 0 && (
-        <div className="rulesets">
-          {rulesets.map((rs) => (
-            <span key={rs.name} className="ruleset" title={`${rs.count} finding${rs.count === 1 ? "" : "s"} from chant's ${rs.prefix}* rules`}>
-              {rs.name}
-              <i>{rs.prefix}</i>
-              <b>{rs.count}</b>
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="rulesets">
+        {catalogs.map((c) => (
+          <span
+            key={c.id}
+            className={c.count > 0 ? "ruleset spoke" : "ruleset quiet"}
+            title={
+              c.count > 0
+                ? `${c.count} finding${c.count === 1 ? "" : "s"} from chant's ${c.prefixes.join("/")}* rules — reads ${c.reads}`
+                : `chant ran its ${c.prefixes.join("/")}* rules and found nothing — reads ${c.reads}`
+            }
+          >
+            {c.name}
+            <i>{c.prefixes[0]}</i>
+            <b>{c.count > 0 ? c.count : "—"}</b>
+          </span>
+        ))}
+      </div>
 
       <div className="report-head">
         <div className="tiers">

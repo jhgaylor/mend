@@ -25,6 +25,12 @@ calls, refuses the ones that turn on intent it cannot see, verifies by
 re-running the audit, and hands back one reviewable patch — or opens the pull
 request from your browser.
 
+The report shows **all ten** of chant's rule catalogs, not just the ones that
+fired — GitHub Actions, GitLab CI, Forgejo, Kubernetes (with Argo CD and Flux),
+Docker, CloudFormation, Azure ARM, Google Cloud, Helm and Fountain. Ten catalogs
+ran; the ones with nothing to say are shown greyed rather than hidden, because
+"chant read your Helm charts and they were fine" is a result too.
+
 Nothing here is hosted magic. The audit is the same CLI you can run yourself:
 
 ```sh
