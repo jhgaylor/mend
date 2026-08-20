@@ -55,6 +55,12 @@ export function environmentSpec(): {
 /** The npx form of the same toolset, for a computer where the global install did not land. */
 const NPX_CHANT = `npx -y ${CHANT_PACKAGES.map((p) => `-p ${p}`).join(" ")} chant`;
 
+/**
+ * The same audit, on your own machine, against the repo you are standing in —
+ * shown in the report so the point lands: this is a CLI, not a hosted trick.
+ */
+export const LOCAL_AUDIT_COMMAND = `${NPX_CHANT} audit .`;
+
 /** What the app sends to kick off (or redo) the audit. */
 export const AUDIT_PROMPT = "Audit the repository now: clone it, run chant audit, and report the audit-report block.";
 

@@ -4,8 +4,11 @@
  * folded away. Every rule id links to its entry in the rules reference.
  */
 import { useState } from "react";
+import { copyText } from "../lib/download";
 import { fileUrl, type RepoRef } from "../lib/hosts";
 import { arrangeReport, ruleDocUrl, type AuditReport, type Finding } from "../lib/protocol";
+import { rulesetsIn } from "../lib/rulesets";
+import { LOCAL_AUDIT_COMMAND } from "../lib/spec";
 
 export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () => void; mendLabel?: string; mendDisabled?: boolean }) {
   const { report, repo } = props;
@@ -13,9 +16,62 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
   const s = report.summary;
   const branch = report.branch ?? "main";
   const [openHygiene, setOpenHygiene] = useState(false);
+  const [openHow, setOpenHow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const rulesets = rulesetsIn(report.findings);
 
   return (
     <section className="report">
+      <div className="chantbar">
+        <span className="chantmark">
+          <b>chant</b> audit
+        </span>
+        <span className="fineprint">
+          {report.scanned !== undefined ? `read ${report.scanned} files` : "read this repo"}
+          {rulesets.length > 0 && ` with ${rulesets.length} of its rule ${rulesets.length === 1 ? "catalog" : "catalogs"}`}
+        </span>
+        <button className="linkish" onClick={() => setOpenHow((v) => !v)}>
+          run this yourself
+        </button>
+      </div>
+      {openHow && (
+        <div className="howto">
+          <p className="fineprint">
+            The audit is a CLI — the agent just ran it on a computer of its own. In any checkout:
+          </p>
+          <div className="cmdrow">
+            <code>{LOCAL_AUDIT_COMMAND}</code>
+            <button
+              onClick={() =>
+                void copyText(LOCAL_AUDIT_COMMAND).then((ok) => {
+                  setCopied(ok);
+                  window.setTimeout(() => setCopied(false), 2000);
+                })
+              }
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="fineprint">
+            Same engine behind <a href="https://blacklight.intentius.io">blacklight</a>. Docs:{" "}
+            <a href="https://intentius.io/chant/cli/audit/">chant audit</a> ·{" "}
+            <a href="https://intentius.io/chant/lint-rules/audit-rules/">every rule</a>.
+          </p>
+        </div>
+      )}
+
+      {rulesets.length > 0 && (
+        <div className="rulesets">
+          {rulesets.map((rs) => (
+            <span key={rs.name} className="ruleset" title={`${rs.count} finding${rs.count === 1 ? "" : "s"} from chant's ${rs.prefix}* rules`}>
+              {rs.name}
+              <i>{rs.prefix}</i>
+              <b>{rs.count}</b>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="report-head">
         <div className="tiers">
           <Tier n={s.quickWin} label="quick wins" tone="ok" />
@@ -41,7 +97,7 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
       {quickWins.length > 0 && (
         <div className="tier-block">
           <h3>
-            Quick wins <span className="fineprint">deterministic — chant ships the diff</span>
+            Quick wins <span className="fineprint">chant knows the exact fix and ships the diff</span>
           </h3>
           {quickWins.map((qw) => (
             <div key={qw.file} className="filegroup">
@@ -61,7 +117,7 @@ export function Report(props: { report: AuditReport; repo: RepoRef; onMend?: () 
       {needsReview.length > 0 && (
         <div className="tier-block">
           <h3>
-            Needs review <span className="fineprint">a judgement call — this is what the mender reasons about</span>
+            Needs review <span className="fineprint">chant will not guess — this is the part an agent can do for you</span>
           </h3>
           {needsReview.map((cluster) => (
             <div key={cluster.name} className="cluster">

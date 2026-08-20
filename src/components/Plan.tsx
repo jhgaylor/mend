@@ -35,7 +35,7 @@ export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string; sel
   return (
     <section className="plan">
       <div className="plan-head">
-        <h3>The mend</h3>
+        <h3>What the agent did with it</h3>
         {delta !== null && (
           <span className="delta">
             {`merge-worthy ${plan.before!.mergeWorthy} → `}

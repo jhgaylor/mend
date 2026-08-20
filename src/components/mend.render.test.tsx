@@ -43,6 +43,20 @@ const view = foldThread([{ reply: REPORT_BLOCK }, { reply: PLAN_BLOCK }]);
 describe("Report", () => {
   const html = renderToString(<Report report={view.report!} repo={REPO} onMend={() => {}} />);
 
+  test("leads with chant: the tool, the breadth, and how to run it yourself", () => {
+    expect(html).toContain("chant");
+    expect(html).toContain("read 12 files");
+    expect(html).toContain("2 of its rule catalogs"); // GHA + DKRD fired
+    expect(html).toContain("run this yourself");
+  });
+
+  test("names the rule catalogs that actually fired, with counts", () => {
+    expect(html).toContain("GitHub Actions");
+    expect(html).toContain("GHA");
+    expect(html).toContain("Docker");
+    expect(html).toContain("DKRD");
+  });
+
   test("tier counts, provenance and the scanned file count", () => {
     expect(html).toContain("quick wins");
     expect(html).toContain("needs review");

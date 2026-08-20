@@ -1,23 +1,45 @@
 # Mend
 
-Find the misconfigurations in a repo's infrastructure — then fix them.
+**See what [`chant audit`](https://intentius.io/chant/cli/audit/) finds in a
+repo's infrastructure — then see what an agent does with it once you hand it
+the tool.**
 
-Name a public repo and Mend hires a *mender*: an agent on its own computer
-that clones the repo, runs a [`chant audit`](https://intentius.io/chant/cli/audit/)
-over its CI workflows, Kubernetes manifests, Dockerfiles, Helm charts and
-cloud templates, and then does something an audit tool cannot — applies the
-mechanical fixes, reasons through the judgement calls, refuses to guess at the
-ones that turn on intent it cannot see, and hands you one reviewable patch.
+chant is a type system for operations, and `chant audit` is the part of it you
+can point at any repo today. It reads the CI workflows, Kubernetes manifests,
+Dockerfiles, Helm charts, CloudFormation, ARM and Config Connector templates it
+finds, runs a few hundred security and correctness checks over them, and — the
+part that matters — sorts what it finds by *how confident the fix is*:
 
-The audit half is the engine behind [blacklight](https://blacklight.intentius.io)
-(a hosted `chant audit`) running locally on the sandbox instead of at the edge.
-The mending half is the point of the demo: a report tells you what is wrong, an
-agent with a real computer can go and change it.
+| tier | chant's position |
+|---|---|
+| **quick win** (merge-worthy, deterministic) | it knows the exact fix and ships the unified diff |
+| **needs review** (merge-worthy, guidance) | it is confident something is wrong, and will not guess at the fix |
+| **hygiene** (report-only) | worth knowing, not worth a PR |
 
-It is a static single-page app with no backend of its own — it talks only to
-the [Fountain](https://github.com/BinaryBourbon/fountain) API, where each mender
-runs as a teammate (an agent in a sandbox with a real shell, git, and the chant
-CLI). Client patterns (OAuth, SSE, API client) follow
+Most tools stop at a list. That middle tier is why this app exists: it is
+precisely the work that needs judgement and a real machine — read the file,
+understand what the job is for, decide whether the change preserves behaviour.
+So Mend gives chant to an agent (Claude, on a computer of its own) and lets it
+finish the job: it applies the mechanical fixes, reasons through the judgement
+calls, refuses the ones that turn on intent it cannot see, verifies by
+re-running the audit, and hands back one reviewable patch — or opens the pull
+request from your browser.
+
+Nothing here is hosted magic. The audit is the same CLI you can run yourself:
+
+```sh
+npx -p @intentius/chant -p @intentius/chant-lexicon-github …  chant audit .
+```
+
+The same engine runs hosted at [blacklight](https://blacklight.intentius.io).
+This page is the version with an agent attached.
+
+**Where Fountain comes in:** the agent needs a real computer — a shell, git, and
+chant on the PATH — and something has to hand the browser a stream of what it is
+doing. That is [Fountain](https://github.com/BinaryBourbon/fountain), and that is
+all it is here: the stagehand. Mend is a static page with no backend of its own;
+it talks to the Fountain API for the sandbox and to api.github.com for the pull
+request. Client patterns (OAuth, SSE, API client) follow
 [repo-sage](https://github.com/jhgaylor/repo-sage) /
 [dns-desk](https://github.com/jhgaylor/dns-desk).
 

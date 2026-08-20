@@ -31,10 +31,12 @@ export function Connect(props: { error: string | null; onPaste: (s: Settings) =>
           Mend<span>.</span>
         </div>
         <p className="setup-tag">
-          Point it at a public repo. It runs a{" "}
-          <a href="https://intentius.io/chant/cli/audit/">chant audit</a> over the CI, manifests and templates, then an
-          agent on its own computer fixes what it can and hands you the patch. Runs on your{" "}
-          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.
+          What <a href="https://intentius.io/chant/cli/audit/">chant audit</a> finds in a repo's CI, manifests and
+          cloud templates — and what an agent does with it once you hand it the tool.
+        </p>
+        <p className="setup-tag">
+          The agent needs a computer to run chant on, which is what{" "}
+          <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> provides. Point this at yours to begin.
         </p>
         {props.error && <p className="error">{props.error}</p>}
         <label>

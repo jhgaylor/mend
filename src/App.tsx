@@ -486,9 +486,9 @@ export function App() {
             sign out
           </button>
           <p className="fineprint">
-            Audits by <a href="https://intentius.io/chant/cli/audit/">chant</a> · runs on{" "}
-            <a href="https://github.com/BinaryBourbon/fountain">Fountain</a> ·{" "}
-            <a href="https://github.com/jhgaylor/mend">source</a>
+            The audit is <a href="https://intentius.io/chant/cli/audit/">chant</a>. The computer it runs on is{" "}
+            <a href="https://github.com/BinaryBourbon/fountain">Fountain</a>.{" "}
+            <a href="https://github.com/jhgaylor/mend">Source</a>.
           </p>
         </div>
       </aside>
@@ -516,8 +516,9 @@ export function App() {
               {view.report === null && !settled && (
                 <div className="status-card">
                   <p>
-                    The mender is getting a computer, cloning <code>{refLabel(current.ref)}</code>, and running{" "}
-                    <code>chant audit</code> over its CI, manifests and templates. The report lands here when it is done.
+                    The agent is getting a computer, cloning <code>{refLabel(current.ref)}</code>, and running{" "}
+                    <code>chant audit</code> over its CI, manifests and templates — the same command you would run
+                    locally. The report lands here when it is done.
                   </p>
                 </div>
               )}
@@ -609,12 +610,20 @@ export function App() {
         ) : (
           <div className="hero">
             <div className="hero-card">
-              <h1>Find the misconfigurations. Then fix them.</h1>
+              <h1>
+                See what <b>chant</b> finds in your infrastructure. Then watch an agent fix it.
+              </h1>
               <p>
-                Name a public repo. A mender — an agent on its own computer — clones it, runs a{" "}
-                <a href="https://intentius.io/chant/cli/audit/">chant audit</a> over the CI workflows, Kubernetes
-                manifests, Dockerfiles, Helm charts and cloud templates, then applies the mechanical fixes, reasons
-                through the judgement calls, and hands you one patch.
+                <a href="https://intentius.io/chant/cli/audit/">chant audit</a> is a CLI: point it at a repo and it
+                reads the CI workflows, Kubernetes manifests, Dockerfiles, Helm charts and cloud templates and runs a
+                few hundred security and correctness checks over them. It sorts what it finds by how confident the fix
+                is — mechanical ones it can write the diff for, judgement calls it refuses to guess at, and hygiene that
+                is not worth a PR.
+              </p>
+              <p>
+                That second pile is the interesting one. Give chant to an agent (Claude, on a computer of its own) and
+                the report stops being a list: it applies the mechanical fixes, reasons through the judgement calls,
+                says plainly which ones need a human — and hands you a patch, or opens the pull request.
               </p>
               <AddRepoForm big disabled={adding !== null} onAdd={(v) => void addRepo(v)} />
               {pendingKey && (
@@ -623,8 +632,9 @@ export function App() {
                 </p>
               )}
               <p className="fineprint">
-                Same engine as <a href="https://blacklight.intentius.io">blacklight</a> — github.com, gitlab.com and
-                codeberg.org, public repos only.
+                Public repos on github.com, gitlab.com or codeberg.org. The same audit runs hosted at{" "}
+                <a href="https://blacklight.intentius.io">blacklight</a> and locally as{" "}
+                <code>chant audit .</code> — this page is the version with an agent attached.
               </p>
             </div>
           </div>
