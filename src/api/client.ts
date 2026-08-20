@@ -107,6 +107,11 @@ export class FountainClient {
     return this.json<{ data: Agent }>("POST", "/api/agents", input).then((r) => r.data);
   }
 
+  /** Update an existing agent — used to bring an old mender's system prompt up to date. */
+  updateAgent(id: string, input: { system?: string; description?: string }): Promise<Agent> {
+    return this.json<{ data: Agent }>("PUT", `/api/agents/${id}`, input).then((r) => r.data);
+  }
+
   getCatalog(): Promise<Catalog> {
     return this.json<{ data: Catalog }>("GET", "/api/catalog").then((r) => r.data);
   }

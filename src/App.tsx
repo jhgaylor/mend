@@ -120,6 +120,14 @@ export function App() {
   const convIdRef = useRef<string | null>(null);
   convIdRef.current = convId;
 
+  /**
+   * The system prompt is baked into the agent, so a mender hired before a
+   * protocol change still speaks the old one — no per-fix diffs, no PR panel,
+   * and no way for the user to tell why. Bring it up to date in place (Fountain
+   * rewrites the instructions file on the computer at the next reattach).
+   */
+  const healedRef = useRef<Set<string>>(new Set());
+
   const refreshTeam = useCallback(async () => {
     if (!client || !settings) return;
     try {
@@ -157,6 +165,24 @@ export function App() {
     },
     [settings],
   );
+
+  useEffect(() => {
+    if (!client || !current) return;
+    const agentId = current.teammate.agent_id;
+    const want = systemPrompt(current.ref);
+    if (current.teammate.agent.system === want || healedRef.current.has(agentId)) return;
+    healedRef.current.add(agentId);
+    void (async () => {
+      try {
+        await client.updateAgent(agentId, { system: want, description: agentDescription(current.ref) });
+        await refreshTeam();
+        say("This mender was hired before the current protocol — updated it. Run Mend again to get per-fix diffs and the pull-request button.");
+      } catch (err) {
+        healedRef.current.delete(agentId);
+        say(`Could not update this mender to the current protocol: ${describeError(err)}`);
+      }
+    })();
+  }, [client, current, refreshTeam, say]);
 
   // ── the selected mender's thread ──────────────────────────────────────────
 
@@ -360,6 +386,11 @@ export function App() {
         // Reuse an agent left over from an earlier run; otherwise create one.
         let agent = (await client.listAgents(name)).find((a) => a.name === name);
         const environmentId = await ensureEnvironment();
+        if (agent && agent.system !== systemPrompt(ref)) {
+          // Left over from an earlier hire, on an older contract.
+          agent = await client.updateAgent(agent.id, { system: systemPrompt(ref), description: agentDescription(ref) });
+          healedRef.current.add(agent.id);
+        }
         if (!agent) {
           if (!catalogRef.current) catalogRef.current = await client.getCatalog().catch(() => null);
           const models = Object.values(catalogRef.current?.models ?? {}).flat();
@@ -527,6 +558,20 @@ export function App() {
                 />
               )}
               {view.patch !== null && <Patch patch={view.patch} repo={current.ref} />}
+              {view.plan && selectableIds.size === 0 && (
+                <div className="status-card">
+                  <p>
+                    This mend came back without per-fix diffs, so there is nothing to tick for a pull request — it
+                    predates the current protocol. Run <b>Mend again</b> and the mender will send one diff per fix,
+                    which is what the pull-request panel builds from.
+                  </p>
+                  <div className="status-actions">
+                    <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, MEND_PROMPT)}>
+                      Mend again
+                    </button>
+                  </div>
+                </div>
+              )}
               {view.plan && selectableIds.size > 0 && (
                 <PrPanel
                   repo={current.ref}
