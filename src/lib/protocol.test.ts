@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { arrangeReport, foldThread, parseBlocks, stripBlocks, ruleDocUrl, type AuditReport, type MendPlan, type ProtocolBlock } from "./protocol";
+import { arrangeReport, foldThread, parseBlocks, selectableFixes, stripBlocks, ruleDocUrl, type AuditReport, type MendPlan, type ProtocolBlock } from "./protocol";
 
 /** The blocks are a tagged union; these narrow one out or fail the test loudly. */
 function reportOf(blocks: ProtocolBlock[], i = 0): AuditReport {
@@ -119,7 +119,7 @@ describe("foldThread", () => {
   });
 
   test("nothing at all folds to an empty view", () => {
-    expect(foldThread([{ reply: "just prose" }])).toEqual({ report: null, reportTurnIndex: null, plan: null, patch: null, planTurnIndex: null });
+    expect(foldThread([{ reply: "just prose" }])).toEqual({ report: null, reportTurnIndex: null, plan: null, patch: null, planTurnIndex: null, draft: null });
   });
 });
 
@@ -142,4 +142,85 @@ describe("arrangeReport", () => {
 
 test("ruleDocUrl points at the rules reference", () => {
   expect(ruleDocUrl("GHA033")).toBe("https://intentius.io/chant/lint-rules/audit-rules/#gha033");
+});
+
+describe("per-fix diffs and PR drafts", () => {
+  const PLAN_WITH_FIXES = `\`\`\`mend-plan
+{"fixes":[{"id":1,"status":"applied","checkIds":["GHA033"],"files":["a.yml"],"title":"Permissions"},
+          {"id":2,"status":"proposed","checkIds":["GHA021"],"files":["a.yml"],"title":"Pin"},
+          {"id":3,"status":"skipped","checkIds":["WK8110"],"files":["k.yaml"],"title":"hostNetwork"}]}
+\`\`\`
+
+\`\`\`mend-fix 1
+diff --git a/a.yml b/a.yml
+--- a/a.yml
++++ b/a.yml
+@@ -1 +1 @@
+-permissions: write-all
++permissions: {}
+\`\`\`
+
+\`\`\`mend-fix 2
+diff --git a/a.yml b/a.yml
+--- a/a.yml
++++ b/a.yml
+@@ -5 +5 @@
+-  uses: actions/checkout@v4
++  uses: actions/checkout@sha
+\`\`\``;
+
+  test("attaches each fix's diff by id", () => {
+    const view = foldThread([{ reply: PLAN_WITH_FIXES }]);
+    expect(view.plan!.fixes[0]!.diff).toContain("permissions: {}");
+    expect(view.plan!.fixes[1]!.diff).toContain("actions/checkout@sha");
+    expect(view.plan!.fixes[2]!.diff).toBeUndefined();
+  });
+
+  test("selectableFixes drops skipped fixes and any without a diff", () => {
+    const view = foldThread([{ reply: PLAN_WITH_FIXES }]);
+    expect(selectableFixes(view.plan).map((f) => f.id)).toEqual([1, 2]);
+    expect(selectableFixes(null)).toEqual([]);
+  });
+
+  test("a later reply can revise one fix's diff without resending the plan", () => {
+    const view = foldThread([
+      { reply: PLAN_WITH_FIXES },
+      { reply: "Revised.\n\n```mend-fix 2\ndiff --git a/a.yml b/a.yml\n--- a/a.yml\n+++ b/a.yml\n@@ -5 +5 @@\n-old\n+newer\n```" },
+    ]);
+    expect(view.plan!.fixes[1]!.diff).toContain("+newer");
+    expect(view.plan!.fixes[0]!.diff).toContain("permissions: {}"); // untouched
+  });
+
+  test("a pr-draft reads as title + body, commit-message style", () => {
+    const view = foldThread([
+      { reply: PLAN_WITH_FIXES },
+      { reply: "Drafted.\n\n```pr-draft\nci: harden the build workflow\n\nTwo findings from a chant audit.\n\n- GHA033\n```" },
+    ]);
+    expect(view.draft).toEqual({ title: "ci: harden the build workflow", body: "Two findings from a chant audit.\n\n- GHA033" });
+  });
+
+  test("a title-only draft has an empty body, and a blank draft is ignored", () => {
+    expect(parseBlocks("```pr-draft\njust a title\n```")).toEqual([{ kind: "draft", draft: { title: "just a title", body: "" } }]);
+    expect(parseBlocks("```pr-draft\n\n```")).toEqual([]);
+  });
+
+  test("a new plan clears a draft written for the old one", () => {
+    const view = foldThread([
+      { reply: PLAN_WITH_FIXES },
+      { reply: "```pr-draft\nold title\n```" },
+      { reply: PLAN_WITH_FIXES },
+    ]);
+    expect(view.draft).toBeNull();
+  });
+
+  test("a re-audit clears plan, patch and draft together", () => {
+    const view = foldThread([{ reply: PLAN_WITH_FIXES }, { reply: "```pr-draft\nt\n```" }, { reply: REPORT }]);
+    expect(view.plan).toBeNull();
+    expect(view.draft).toBeNull();
+    expect(view.patch).toBeNull();
+  });
+
+  test("a malformed fix id is skipped", () => {
+    expect(parseBlocks("```mend-fix notanumber\ndiff\n```")).toEqual([]);
+  });
 });

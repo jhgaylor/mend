@@ -63,10 +63,9 @@ const PLAN = {
     { id: 1, status: "applied", checkIds: ["GHA033"], files: [".github/workflows/ci.yml"], title: "Least-privilege workflow permissions", note: "The build only reads the repo, so contents: read." },
     { id: 2, status: "applied", checkIds: ["WK8203"], files: ["k8s/deployment.yaml"], title: "Run the container as a non-root user", note: "nginx:alpine already ships an unprivileged user." },
     { id: 3, status: "applied", checkIds: ["DKRD012"], files: ["Dockerfile"], title: "Pin the base image to a digest", note: "Resolved nginx:alpine to its current digest; tag kept as a comment." },
-    { id: 4, status: "proposed", checkIds: ["GHA021"], files: [".github/workflows/ci.yml"], title: "Pin actions/checkout to a commit SHA", note: "Resolved v4 to 11bd719 via git ls-remote." },
-    { id: 5, status: "proposed", checkIds: ["GHA019"], files: [".github/workflows/ci.yml"], title: "Stop persisting credentials after checkout", note: "No later step pushes, so persist-credentials: false is safe." },
-    { id: 6, status: "proposed", checkIds: ["GHA044"], files: [".github/workflows/pr.yml"], title: "Move untrusted input into an env var", note: "The PR title now arrives as $PR_TITLE instead of being interpolated." },
-    { id: 7, status: "skipped", checkIds: ["WK8110"], files: ["k8s/deployment.yaml"], title: "hostNetwork on the web pod", note: "Might be load-bearing for your ingress path — decide whether the pod needs the node's stack." },
+    { id: 4, status: "proposed", checkIds: ["GHA021", "GHA019"], files: [".github/workflows/ci.yml"], title: "Pin actions/checkout and stop persisting credentials", note: "Resolved v4 to 11bd719; no later step pushes, so persist-credentials: false is safe." },
+    { id: 5, status: "proposed", checkIds: ["GHA044"], files: [".github/workflows/pr.yml"], title: "Move untrusted input into an env var", note: "The PR title now arrives as $PR_TITLE instead of being interpolated." },
+    { id: 6, status: "skipped", checkIds: ["WK8110"], files: ["k8s/deployment.yaml"], title: "hostNetwork on the web pod", note: "Might be load-bearing for your ingress path — decide whether the pod needs the node's stack." },
   ],
   pr: {
     title: "ci, k8s: harden config per chant audit",
@@ -133,6 +132,70 @@ index 7b2ee31..0f5a1c8 100644
            ports:
              - containerPort: 8080`;
 
+
+/** One diff per changed fix — what the app ticks on and off to build a PR.
+ *  Each applies on its own against the audited commit; none overlap. */
+const FIX_DIFFS: Record<number, string> = {
+  1: `diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,5 +1,6 @@
+ name: ci
+ on: [push]
+-permissions: write-all
++permissions:
++  contents: read
+ jobs:
+   build:`,
+  2: `diff --git a/k8s/deployment.yaml b/k8s/deployment.yaml
+--- a/k8s/deployment.yaml
++++ b/k8s/deployment.yaml
+@@ -16,6 +16,11 @@ spec:
+         - name: web
+           image: ghcr.io/example/web:sha-0000000
++          securityContext:
++            runAsNonRoot: true
++            runAsUser: 101
++            allowPrivilegeEscalation: false
++            readOnlyRootFilesystem: true
+           ports:
+             - containerPort: 8080`,
+  3: `diff --git a/Dockerfile b/Dockerfile
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,3 +1,3 @@
+-FROM nginx:alpine
++FROM nginx:alpine@sha256:41523187cf7d7a2f2677a80609d9caa14388bf5c1fbca9c410ba3de602aaaab4 # alpine
+ COPY nginx.conf /etc/nginx/conf.d/default.conf
+ COPY site/ /usr/share/nginx/html/`,
+  4: `diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -8,7 +8,9 @@ jobs:
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
++        with:
++          persist-credentials: false
+       - run: npm ci
+       - run: npm test`,
+  5: `diff --git a/.github/workflows/pr.yml b/.github/workflows/pr.yml
+--- a/.github/workflows/pr.yml
++++ b/.github/workflows/pr.yml
+@@ -6,5 +6,7 @@ jobs:
+   greet:
+     runs-on: ubuntu-latest
+     steps:
+-      - run: echo "Reviewing \${{ github.event.pull_request.title }}"
++      - env:
++          PR_TITLE: \${{ github.event.pull_request.title }}
++        run: echo "Reviewing $PR_TITLE"`,
+};
+
+const fixBlocks = Object.entries(FIX_DIFFS)
+  .map(([id, diff]) => `\n\n\`\`\`mend-fix ${id}\n${diff}\n\`\`\``)
+  .join("");
+
 const AUDIT_REPLY = `Cloned it and ran \`chant audit\`. This repo has two GitHub Actions workflows, a Dockerfile and a small Kubernetes kustomization — 14 files in scope. Nine findings: three are mechanical, four want a judgement call, two are hygiene. The two errors are a \`write-all\` workflow token and a container with no \`runAsNonRoot\`.
 
 \`\`\`audit-report
@@ -143,7 +206,7 @@ const MEND_REPLY = `Applied the three quick wins, proposed three more, and left 
 
 \`\`\`mend-plan
 ${JSON.stringify(PLAN)}
-\`\`\`
+\`\`\`${fixBlocks}
 
 \`\`\`mend-patch
 ${PATCH}
@@ -153,9 +216,26 @@ const now = "2026-08-20T10:05:00.000000Z";
 const AUDIT_PROMPT = "Audit the repository now: clone it, run chant audit, and report the audit-report block.";
 const MEND_PROMPT = "Mend it: apply the quick wins, propose fixes for the needs-review findings, and report the mend-plan and mend-patch blocks.";
 
+const DRAFT_REPLY = `Drafted a pull request for the three applied fixes.
+
+\`\`\`pr-draft
+ci, docker: harden the build per chant audit
+
+A \`chant audit\` of this repo flagged 7 merge-worthy findings; this covers the three mechanical ones.
+
+- **Least-privilege workflow permissions** (GHA033) — the build only reads the repo, so \`contents: read\` is enough.
+- **Run the container as a non-root user** (WK8203) — nginx:alpine already ships an unprivileged user.
+- **Pin the base image to a digest** (DKRD012) — the \`alpine\` tag is kept as a trailing comment.
+\`\`\``;
+
+const DRAFT_PROMPT = "Draft the pull request for exactly these fixes and no others: 1 (Least-privilege workflow permissions), 2 (Run the container as a non-root user), 3 (Pin the base image to a digest). Reply with one short sentence and one pr-draft block.";
+
 const turns = [
   { id: "t1", turn_number: 1, prompt: AUDIT_PROMPT, status: "completed", exit_code: 0, started_at: now, ended_at: now, inserted_at: now },
   { id: "t2", turn_number: 2, prompt: MEND_PROMPT, status: "completed", exit_code: 0, started_at: now, ended_at: now, inserted_at: now },
+  // Drop this turn to develop against the pre-draft state (the "Draft the PR
+  // description" button) instead of the filled form.
+  { id: "t3", turn_number: 3, prompt: DRAFT_PROMPT, status: "completed", exit_code: 0, started_at: now, ended_at: now, inserted_at: now },
 ];
 
 const eventData = [
@@ -173,6 +253,7 @@ const eventData = [
   { turn: "t2", data: tool("c6", "chant audit", "--format json -o /tmp/after.json") },
   { turn: "t2", data: toolDone("c6", "1 merge-worthy finding remains") },
   { turn: "t2", data: chunk(MEND_REPLY) },
+  { turn: "t3", data: chunk(DRAFT_REPLY) },
 ];
 
 const events = eventData.map((e, i) => ({

@@ -11,7 +11,7 @@ import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import { parseRepoInput, refKey, refLabel, repoUrl, type RepoRef } from "./lib/hosts";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
-import { foldThread, stripBlocks } from "./lib/protocol";
+import { foldThread, selectableFixes, stripBlocks } from "./lib/protocol";
 import { loadSelected, reconcileRepos, saveRepo, saveSelected } from "./lib/repos";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import {
@@ -21,13 +21,15 @@ import {
   ENVIRONMENT_NAME,
   environmentSpec,
   MEND_PROMPT,
+  prDraftPrompt,
   refOfAgentName,
   STARTERS,
   systemPrompt,
 } from "./lib/spec";
 import { Connect } from "./components/Connect";
 import { Patch } from "./components/Patch";
-import { Plan } from "./components/Plan";
+import { Plan, type Selection } from "./components/Plan";
+import { PrPanel } from "./components/PrPanel";
 import { Report } from "./components/Report";
 import { Work, type ThreadEntry } from "./components/Work";
 
@@ -55,6 +57,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /** Fix ids ticked for the pull request; null means "everything selectable". */
+  const [picked, setPicked] = useState<Set<number> | null>(null);
 
   const client = useMemo(() => (settings ? new FountainClient(settings) : null), [settings]);
   const catalogRef = useRef<Catalog | null>(null);
@@ -258,6 +262,36 @@ export function App() {
   }, [turns, events, runtime]);
 
   const view = useMemo(() => foldThread(thread), [thread]);
+
+  // A new plan (or a re-audit) invalidates the selection — fall back to "all".
+  const planKey = `${view.planTurnIndex ?? -1}:${view.plan?.fixes.length ?? 0}`;
+  const lastPlanKey = useRef(planKey);
+  useEffect(() => {
+    if (lastPlanKey.current !== planKey) {
+      lastPlanKey.current = planKey;
+      setPicked(null);
+    }
+  }, [planKey]);
+
+  const selectable = useMemo(() => selectableFixes(view.plan), [view.plan]);
+  const selectableIds = useMemo(() => new Set(selectable.map((f) => f.id)), [selectable]);
+  const pickedIds = useMemo(() => picked ?? selectableIds, [picked, selectableIds]);
+  const pickedFixes = useMemo(() => selectable.filter((f) => pickedIds.has(f.id)), [selectable, pickedIds]);
+  const selection: Selection = useMemo(
+    () => ({
+      selected: pickedIds,
+      selectable: selectableIds,
+      onToggle: (id: number) =>
+        setPicked((cur) => {
+          const next = new Set(cur ?? selectableIds);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        }),
+      onAll: (on: boolean) => setPicked(on ? new Set(selectableIds) : new Set()),
+    }),
+    [pickedIds, selectableIds],
+  );
   const working = thread.some((t) => t.turn.ended_at === null && t.turn.status !== "failed");
   const settled = thread.length > 0 && !working;
   const auditFailed = view.report === null && settled;
@@ -484,8 +518,24 @@ export function App() {
                 />
               )}
 
-              {view.plan && <Plan plan={view.plan} repo={current.ref} branch={view.report?.branch ?? "main"} />}
+              {view.plan && (
+                <Plan
+                  plan={view.plan}
+                  repo={current.ref}
+                  branch={view.report?.branch ?? "main"}
+                  {...(selectableIds.size > 0 ? { selection } : {})}
+                />
+              )}
               {view.patch !== null && <Patch patch={view.patch} repo={current.ref} />}
+              {view.plan && selectableIds.size > 0 && (
+                <PrPanel
+                  repo={current.ref}
+                  selected={pickedFixes}
+                  draft={view.draft}
+                  agentBusy={busy || working}
+                  onRequestDraft={() => agentId && void drive(agentId, prDraftPrompt(pickedFixes), 1)}
+                />
+              )}
 
               <Work thread={thread} working={working} />
 

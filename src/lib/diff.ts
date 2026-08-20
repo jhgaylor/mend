@@ -14,6 +14,13 @@ export interface DiffLine {
 
 export interface Hunk {
   header: string;
+  /** 1-based first line of the hunk in the original file (0 for an empty file). */
+  oldStart: number;
+  /** How many original lines the hunk consumes. */
+  oldCount: number;
+  /** 1-based first line in the patched file. */
+  newStart: number;
+  newCount: number;
   lines: DiffLine[];
 }
 
@@ -36,11 +43,19 @@ function stripPrefix(p: string): string | null {
   return p.replace(/^[ab]\//, "");
 }
 
+/** `@@ -oldStart,oldCount +newStart,newCount @@` — counts are optional and default to 1. */
+const HUNK_RANGE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
 export function parseDiff(patch: string): FileDiff[] {
   const out: FileDiff[] = [];
   let file: FileDiff | null = null;
   let hunk: Hunk | null = null;
   const lines = patch.replace(/\r\n/g, "\n").split("\n");
+  // The final newline of the patch leaves a trailing "" element. Left in, it
+  // becomes a phantom empty context line on the last hunk — invisible when
+  // rendering, but it makes the hunk claim one more original line than it has
+  // and every apply fails at the end of the file.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
 
   for (const line of lines) {
     if (line.startsWith("diff --git ")) {
@@ -70,7 +85,15 @@ export function parseDiff(patch: string): FileDiff[] {
     if (file && line.startsWith("new file mode")) file.status = "added";
     if (file && line.startsWith("deleted file mode")) file.status = "deleted";
     if (line.startsWith("@@") && file) {
-      hunk = { header: line, lines: [] };
+      const r = HUNK_RANGE.exec(line);
+      hunk = {
+        header: line,
+        oldStart: r ? Number(r[1]) : 0,
+        oldCount: r ? (r[2] === undefined ? 1 : Number(r[2])) : 0,
+        newStart: r ? Number(r[3]) : 0,
+        newCount: r ? (r[4] === undefined ? 1 : Number(r[4])) : 0,
+        lines: [],
+      };
       file.hunks.push(hunk);
       continue;
     }

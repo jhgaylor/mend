@@ -57,16 +57,13 @@ called `Mend toolkit` (`src/lib/spec.ts`) and every mender is created on it:
 environment cannot be created the mender still works — the prompt falls back to
 an `npx -p …` invocation of the same packages.
 
-Two optional things you can add to that environment yourself, in Fountain:
-
-- a `GITHUB_TOKEN` secret — lets a mender open a pull request when you ask it
-  to (`gh pr create`), instead of only handing back a patch.
-- nothing else. Menders clone over anonymous https and never push without that
-  token.
+Nothing else belongs in that environment — in particular **no GitHub token**.
+Menders clone over anonymous https and never push. The pull request is opened by
+the app, from your browser, with your own credential (see below).
 
 ## How it works: the mend protocol
 
-The app and the agent share three fenced blocks, parsed out of the agent's
+The app and the agent share five fenced blocks, parsed out of the agent's
 replies (`src/lib/protocol.ts`; the agent's side of the contract is
 `src/lib/spec.ts` — change one, change both).
 
@@ -116,12 +113,38 @@ Fixes are grouped by what *you* have to do about them, which is the honest axis:
 | `proposed` | the agent's judgement call, made because it was confident — review before merging |
 | `skipped` | the right answer depends on intent the agent cannot see, with a note on what to decide |
 
+Alongside the plan the mender sends **one `mend-fix <id>` block per fix**,
+each carrying only that fix's diff and applying on its own against the
+audited commit. That is what makes the fixes independently selectable — the app can
+build a commit from exactly the ones you tick.
+
 The patch renders as a diff per file and downloads as a `.patch` you apply
-yourself (`git apply mend-owner-name.patch`) — the agent never pushes. Ask for
-changes in the composer ("drop fix 3", "only the security ones", "split this
-per finding") and it revises the working tree and re-emits both blocks; the app
-shows the newest pair. Ask it to open a PR and it will, if the environment has
-a `GITHUB_TOKEN`.
+yourself (`git apply mend-owner-name.patch`). Ask for changes in the composer
+("drop fix 3", "only the security ones", "split this per finding") and it
+revises the working tree and re-emits the blocks; the app shows the newest set.
+
+## Opening a pull request
+
+The agent never opens PRs and never pushes. The app does it, in the browser:
+
+1. **Tick the fixes** you want. Every applied/proposed fix has an *add to PR*
+   box; skipped ones cannot be ticked (nothing was changed for them).
+2. **Connect GitHub** with your own personal access token (`public_repo`
+   scope), stored in this browser under `mend.github`. It is deliberately not a
+   shared token — Mend is a public page, so anything the app could read, every
+   visitor could read. The PR is authored by you, from a credential you revoke.
+3. **Draft the description.** The app asks the mender to write a title and body
+   for *exactly* the ticked fixes; it comes back as a `pr-draft` block and lands
+   in an editable form.
+4. **Open pull request.** The app merges the selected fixes' diffs, reads each
+   file from GitHub at the current head, applies the hunks, and creates blobs, a
+   tree, a commit, a branch and the PR — forking first when you lack push
+   access. `api.github.com` allows this from a page, so no backend is involved.
+
+Every context and deletion line is verified against the file as it is on GitHub
+*right now*. If the branch moved since the audit, the app refuses and tells you
+to re-audit rather than committing a file it cannot vouch for. Opening a PR is
+GitHub-only; on GitLab and Codeberg you get the patch.
 
 The conversation is the system of record: the report, the plan and the patch
 are all derived from turns + blocks on load, and from one `/api/team/stream`
@@ -131,7 +154,7 @@ computer between messages.
 ## Development
 
 ```bash
-bun test           # protocol, hosts, diff parsing, ACP block parsing, SSE, render smoke
+bun test           # protocol, hosts, diff parsing + application, ACP blocks, SSE, render smoke
 bun run typecheck
 bun run build      # tsc + vite
 ```
@@ -139,11 +162,12 @@ bun run build      # tsc + vite
 To work on the UI without a live Fountain, run the mock (`bun run mock`), start
 the app through the dev proxy (`FOUNTAIN_PROXY=http://localhost:8789 bun run
 dev`), and enter `http://localhost:5180` as the Fountain URL with any string as
-the API key — you land on a mender that has already audited a repo and mended
-it, with a full report, plan and patch.
+the API key — you land on a mender that has already audited a repo, mended it
+and drafted a PR, with a full report, per-fix diffs, patch and draft form.
 
 No state outside the browser: settings in `localStorage` (`mend.settings`), the
-repo → mender pairings per Fountain URL (`mend.repos`).
+repo → mender pairings per Fountain URL (`mend.repos`), and your GitHub token
+(`mend.github`). Nothing is stored on a server.
 
 ## Deploy
 

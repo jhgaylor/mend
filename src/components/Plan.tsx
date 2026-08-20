@@ -8,13 +8,21 @@ import { fileUrl, refLabel, type RepoRef } from "../lib/hosts";
 import { copyText, planToMarkdown } from "../lib/download";
 import { ruleDocUrl, type Fix, type FixStatus, type MendPlan } from "../lib/protocol";
 
+/** Ticking fixes into the pull request. Absent when nothing is selectable. */
+export interface Selection {
+  selected: Set<number>;
+  onToggle: (id: number) => void;
+  onAll: (on: boolean) => void;
+  selectable: Set<number>;
+}
+
 const SECTIONS: Array<{ status: FixStatus; title: string; blurb: string }> = [
   { status: "applied", title: "Applied", blurb: "mechanical fixes, already in the patch" },
   { status: "proposed", title: "Proposed", blurb: "the mender's judgement — read these before you merge" },
   { status: "skipped", title: "Left for you", blurb: "the fix depends on intent it cannot see" },
 ];
 
-export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string }) {
+export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string; selection?: Selection }) {
   const { plan, repo } = props;
   const [copied, setCopied] = useState<string | null>(null);
   const flash = (what: string) => {
@@ -40,6 +48,16 @@ export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string }) {
             pull request ↗
           </a>
         )}
+        {props.selection && props.selection.selectable.size > 0 && (
+          <span className="selectall">
+            <button className="linkish" onClick={() => props.selection!.onAll(true)}>
+              all
+            </button>
+            <button className="linkish" onClick={() => props.selection!.onAll(false)}>
+              none
+            </button>
+          </span>
+        )}
       </div>
 
       {SECTIONS.map(({ status, title, blurb }) => {
@@ -53,7 +71,7 @@ export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string }) {
               <span className="count">{fixes.length}</span>
             </div>
             {fixes.map((fix) => (
-              <FixRow key={`${status}-${fix.id}`} fix={fix} repo={repo} branch={props.branch} />
+              <FixRow key={`${status}-${fix.id}`} fix={fix} repo={repo} branch={props.branch} selection={props.selection} />
             ))}
           </div>
         );
@@ -76,11 +94,24 @@ export function Plan(props: { plan: MendPlan; repo: RepoRef; branch: string }) {
   );
 }
 
-function FixRow(props: { fix: Fix; repo: RepoRef; branch: string }) {
-  const { fix } = props;
+function FixRow(props: { fix: Fix; repo: RepoRef; branch: string; selection?: Selection }) {
+  const { fix, selection } = props;
+  const selectable = selection?.selectable.has(fix.id) ?? false;
+  const checked = selection?.selected.has(fix.id) ?? false;
   return (
-    <div className="fix">
+    <div className={selectable && checked ? "fix picked" : "fix"}>
       <div className="fix-head">
+        {selection &&
+          (selectable ? (
+            <label className="pick" title="add this fix to the pull request">
+              <input type="checkbox" checked={checked} onChange={() => selection.onToggle(fix.id)} />
+              <span className="pick-label">add to PR</span>
+            </label>
+          ) : (
+            <span className="pick-none" title={fix.status === "skipped" ? "nothing was changed for this finding" : "the mender did not send a separate diff for this fix"}>
+              —
+            </span>
+          ))}
         <b>{fix.title}</b>
         {fix.checkIds.map((id) => (
           <a key={id} className="ruleid" href={ruleDocUrl(id)} target="_blank" rel="noreferrer">

@@ -64,6 +64,10 @@ export interface Fix {
   files: string[];
   title: string;
   note?: string;
+  /** This fix's own diff, from its `mend-fix <id>` block. Absent when the
+   *  agent only sent the combined patch — then the fix cannot be selected
+   *  individually and the PR has to take the patch whole. */
+  diff?: string;
 }
 
 export interface MendPlan {
@@ -76,20 +80,43 @@ export interface MendPlan {
   pr_url?: string;
 }
 
+/** A pull request the agent drafted for a chosen set of fixes. */
+export interface PrDraft {
+  title: string;
+  body: string;
+}
+
 export type ProtocolBlock =
   | { kind: "report"; report: AuditReport }
   | { kind: "plan"; plan: MendPlan }
-  | { kind: "patch"; patch: string };
+  | { kind: "patch"; patch: string }
+  | { kind: "fix"; id: number; diff: string }
+  | { kind: "draft"; draft: PrDraft };
 
-const FENCE = /```(audit-report|mend-plan|mend-patch)[^\S\n]*\n([\s\S]*?)```/g;
+/** ```<kind> [arg]\n<body>``` — `arg` carries the fix id on a `mend-fix` block. */
+const FENCE = /```(audit-report|mend-plan|mend-patch|mend-fix|pr-draft)(?:[^\S\n]+([^\n]*?))?[^\S\n]*\n([\s\S]*?)```/g;
 
 /** Every well-formed protocol block in one reply, in order. Malformed JSON is skipped. */
 export function parseBlocks(text: string): ProtocolBlock[] {
   const out: ProtocolBlock[] = [];
   for (const m of text.matchAll(FENCE)) {
-    const body = m[2]!;
-    if (m[1] === "mend-patch") {
+    const kind = m[1]!;
+    const arg = m[2];
+    const body = m[3]!;
+    if (kind === "mend-patch") {
       out.push({ kind: "patch", patch: body.replace(/\n$/, "") });
+      continue;
+    }
+    if (kind === "mend-fix") {
+      const id = Number(arg);
+      if (Number.isFinite(id) && body.trim()) out.push({ kind: "fix", id, diff: body.replace(/\n$/, "") });
+      continue;
+    }
+    if (kind === "pr-draft") {
+      // Commit-message shape: the first non-empty line is the title, the rest
+      // is the body. Far kinder to an LLM than newline-escaped JSON.
+      const draft = asDraft(body);
+      if (draft) out.push({ kind: "draft", draft });
       continue;
     }
     let parsed: unknown;
@@ -98,7 +125,7 @@ export function parseBlocks(text: string): ProtocolBlock[] {
     } catch {
       continue;
     }
-    if (m[1] === "audit-report") {
+    if (kind === "audit-report") {
       const report = asReport(parsed);
       if (report) out.push({ kind: "report", report });
     } else {
@@ -107,6 +134,15 @@ export function parseBlocks(text: string): ProtocolBlock[] {
     }
   }
   return out;
+}
+
+function asDraft(body: string): PrDraft | null {
+  const lines = body.replace(/\n+$/, "").split("\n");
+  let i = 0;
+  while (i < lines.length && lines[i]!.trim() === "") i++;
+  const title = lines[i]?.replace(/^#+\s*/, "").trim();
+  if (!title) return null;
+  return { title, body: lines.slice(i + 1).join("\n").trim() };
 }
 
 /** The reply with protocol blocks removed — what the chat bubble shows as prose. */
@@ -118,37 +154,90 @@ export interface MendView {
   /** the newest audit the mender has reported, if any */
   report: AuditReport | null;
   reportTurnIndex: number | null;
-  /** the newest plan, and the patch from that same reply (or the newest patch) */
+  /** the newest plan (fixes carrying their own diffs), and its patch */
   plan: MendPlan | null;
   patch: string | null;
   planTurnIndex: number | null;
+  /** the newest pull request the agent drafted, if one is outstanding */
+  draft: PrDraft | null;
 }
 
-/** Fold a thread (oldest-first replies) into the current state. Newest wins; a re-audit clears the plan. */
+const EMPTY_VIEW: MendView = {
+  report: null,
+  reportTurnIndex: null,
+  plan: null,
+  patch: null,
+  planTurnIndex: null,
+  draft: null,
+};
+
+/**
+ * Fold a thread (oldest-first replies) into the current state. Newest wins: a
+ * re-audit clears the plan, a new plan clears the draft, and a later reply may
+ * revise the patch or a single fix's diff without resending the plan.
+ */
 export function foldThread(turns: Array<{ reply: string }>): MendView {
-  const view: MendView = { report: null, reportTurnIndex: null, plan: null, patch: null, planTurnIndex: null };
+  const view: MendView = { ...EMPTY_VIEW };
   turns.forEach((turn, i) => {
-    let patchHere: string | null = null;
     let planHere: MendPlan | null = null;
+    let patchHere: string | null = null;
+    let draftHere: PrDraft | null = null;
+    const diffs = new Map<number, string>();
+
     for (const block of parseBlocks(turn.reply)) {
-      if (block.kind === "report") {
-        view.report = block.report;
-        view.reportTurnIndex = i;
-        view.plan = null;
-        view.patch = null;
-        view.planTurnIndex = null;
-      } else if (block.kind === "plan") planHere = block.plan;
-      else patchHere = block.patch;
+      switch (block.kind) {
+        case "report":
+          view.report = block.report;
+          view.reportTurnIndex = i;
+          view.plan = null;
+          view.patch = null;
+          view.planTurnIndex = null;
+          view.draft = null;
+          break;
+        case "plan":
+          planHere = block.plan;
+          break;
+        case "patch":
+          patchHere = block.patch;
+          break;
+        case "fix":
+          diffs.set(block.id, block.diff);
+          break;
+        case "draft":
+          draftHere = block.draft;
+          break;
+      }
     }
+
     if (planHere) {
-      view.plan = planHere;
+      view.plan = withDiffs(planHere, diffs);
       view.planTurnIndex = i;
       view.patch = patchHere;
-    } else if (patchHere !== null && view.plan) {
-      view.patch = patchHere;
+      view.draft = null; // a fresh plan invalidates a draft written for the old one
+    } else if (view.plan) {
+      if (patchHere !== null) view.patch = patchHere;
+      if (diffs.size > 0) view.plan = withDiffs(view.plan, diffs);
     }
+    if (draftHere) view.draft = draftHere;
   });
   return view;
+}
+
+function withDiffs(plan: MendPlan, diffs: Map<number, string>): MendPlan {
+  if (diffs.size === 0) return plan;
+  return {
+    ...plan,
+    fixes: plan.fixes.map((f) => {
+      const diff = diffs.get(f.id);
+      return diff ? { ...f, diff } : f;
+    }),
+  };
+}
+
+/** The fixes a pull request can be assembled from: changed, and carrying a diff. */
+export function selectableFixes(plan: MendPlan | null): Fix[] {
+  if (!plan) return [];
+  return plan.fixes.filter((f) => f.status !== "skipped" && typeof f.diff === "string" && f.diff.trim() !== "");
 }
 
 // ── the report, arranged the way blacklight shows it ─────────────────────────
