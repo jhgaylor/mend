@@ -22,6 +22,9 @@ import {
   environmentSpec,
   MEND_PROMPT,
   prDraftPrompt,
+  TOKEN_KEY,
+  vaultDescription,
+  vaultName,
   refOfAgentName,
   STARTERS,
   systemPrompt,
@@ -367,8 +370,29 @@ export function App() {
     }
   }, [client, say]);
 
+  /**
+   * A repository's own vault, holding only its read token. Fountain can only
+   * attach a vault when the teammate is created, so this runs before that.
+   */
+  const ensureVault = useCallback(
+    async (ref: RepoRef, token: string): Promise<string | undefined> => {
+      if (!client) return undefined;
+      try {
+        const name = vaultName(ref);
+        const existing = (await client.listVaults()).find((v) => v.name === name);
+        const vault = existing ?? (await client.createVault({ name, description: vaultDescription(ref) }));
+        await client.putVaultSecret(vault.id, TOKEN_KEY, token);
+        return vault.id;
+      } catch (err) {
+        say(`Could not store the token: ${describeError(err)}`);
+        return undefined;
+      }
+    },
+    [client, say],
+  );
+
   const addRepo = useCallback(
-    async (input: string) => {
+    async (input: string, token?: string) => {
       if (!client || !settings) return;
       const ref = parseRepoInput(input);
       if (!ref) {
@@ -386,6 +410,7 @@ export function App() {
         // Reuse an agent left over from an earlier run; otherwise create one.
         let agent = (await client.listAgents(name)).find((a) => a.name === name);
         const environmentId = await ensureEnvironment();
+        const vaultId = token ? await ensureVault(ref, token) : undefined;
         if (agent && agent.system !== systemPrompt(ref)) {
           // Left over from an earlier hire, on an older contract.
           agent = await client.updateAgent(agent.id, { system: systemPrompt(ref), description: agentDescription(ref) });
@@ -404,7 +429,12 @@ export function App() {
             ...(environmentId ? { environment_id: environmentId } : {}),
           });
         }
-        await client.addTeammate({ agent_id: agent.id, name, ...(environmentId ? { environment_id: environmentId } : {}) });
+        await client.addTeammate({
+          agent_id: agent.id,
+          name,
+          ...(environmentId ? { environment_id: environmentId } : {}),
+          ...(vaultId ? { vault_id: vaultId } : {}),
+        });
         saveRepo(settings.baseUrl, key, agent.id);
         await refreshTeam();
         select(key);
@@ -415,7 +445,46 @@ export function App() {
         setAdding(null);
       }
     },
-    [client, settings, menders, select, refreshTeam, ensureEnvironment, drive, say],
+    [client, settings, menders, select, refreshTeam, ensureEnvironment, ensureVault, drive, say],
+  );
+
+  /**
+   * Attaching a token to a repo that is already here means re-creating the
+   * teammate, because a vault binds at creation. That starts a fresh thread,
+   * so it asks first and says exactly what is lost.
+   */
+  const attachToken = useCallback(
+    async (mender: Mender, token: string) => {
+      if (!client || !settings) return;
+      if (
+        !window.confirm(
+          `Attach a token to ${refLabel(mender.ref)}?\n\nFountain can only bind a vault when a teammate is created, so this rebuilds the mender: its current audit, plan and patch leave this view (the old conversation is kept in Fountain). You will need to audit again.`,
+        )
+      )
+        return;
+      setBusy(true);
+      try {
+        const vaultId = await ensureVault(mender.ref, token);
+        if (!vaultId) return;
+        const environmentId = await ensureEnvironment();
+        await client.removeTeammate(mender.teammate.agent_id);
+        await client.addTeammate({
+          agent_id: mender.teammate.agent_id,
+          name: agentName(mender.ref),
+          ...(environmentId ? { environment_id: environmentId } : {}),
+          vault_id: vaultId,
+        });
+        setTurns([]);
+        setEvents([]);
+        await refreshTeam();
+        say("Token attached. Audit again and the mender will clone with it.");
+      } catch (err) {
+        say(describeError(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, settings, ensureVault, ensureEnvironment, refreshTeam, say],
   );
 
   const retire = useCallback(
@@ -479,7 +548,7 @@ export function App() {
           )}
           {team !== null && menders.length === 0 && !pendingKey && <p className="fineprint">No repos yet.</p>}
         </nav>
-        <AddRepoForm disabled={adding !== null} onAdd={(v) => void addRepo(v)} />
+        <AddRepoForm disabled={adding !== null} onAdd={(v, t) => void addRepo(v, t)} />
         <div className="rail-foot">
           <span className={connected ? "dot on" : "dot"} title={connected ? "live" : "reconnecting"} />
           <button className="linkish" onClick={signOut}>
@@ -502,6 +571,13 @@ export function App() {
                 <code>{refLabel(current.ref)}</code>
               </a>
               <span className="fineprint">{working ? "working…" : current.teammate.presence.label}</span>
+              {current.teammate.conversation.vault_id ? (
+                <span className="private" title={`Cloning with the token in ${vaultName(current.ref)}`}>
+                  private · token attached
+                </span>
+              ) : (
+                <AttachToken disabled={busy || working} onAttach={(t) => void attachToken(current, t)} />
+              )}
               {view.report && (
                 <button className="linkish" disabled={!canDrive} onClick={() => agentId && void drive(agentId, AUDIT_PROMPT)}>
                   re-audit
@@ -625,14 +701,15 @@ export function App() {
                 the report stops being a list: it applies the mechanical fixes, reasons through the judgement calls,
                 says plainly which ones need a human — and hands you a patch, or opens the pull request.
               </p>
-              <AddRepoForm big disabled={adding !== null} onAdd={(v) => void addRepo(v)} />
+              <AddRepoForm big disabled={adding !== null} onAdd={(v, t) => void addRepo(v, t)} />
               {pendingKey && (
                 <p className="fineprint">
                   Hiring a mender for <code>{pendingKey}</code>…
                 </p>
               )}
               <p className="fineprint">
-                Public repos on github.com, gitlab.com or codeberg.org. The same audit runs hosted at{" "}
+                Any repo on github.com, gitlab.com or codeberg.org — public, or private with a read token. The same
+                audit runs hosted at{" "}
                 <a href="https://blacklight.intentius.io">blacklight</a> and locally as{" "}
                 <code>chant audit .</code> — this page is the version with an agent attached.
               </p>
@@ -644,27 +721,84 @@ export function App() {
   );
 }
 
-function AddRepoForm(props: { onAdd: (value: string) => void; disabled: boolean; big?: boolean }) {
+function AddRepoForm(props: { onAdd: (value: string, token?: string) => void; disabled: boolean; big?: boolean }) {
   const [value, setValue] = useState("");
+  const [token, setToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!value.trim()) return;
-    props.onAdd(value);
+    props.onAdd(value, token.trim() || undefined);
     setValue("");
+    setToken("");
+    setShowToken(false);
   };
   return (
     <form className={props.big ? "addrepo big" : "addrepo"} onSubmit={submit}>
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="owner/name or a repo URL"
-        disabled={props.disabled}
-        aria-label="repository"
-      />
-      <button type="submit" className="primary" disabled={props.disabled || !value.trim()}>
-        {props.disabled ? "…" : "Audit"}
-      </button>
+      <div className="addrepo-row">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="owner/name or a repo URL"
+          disabled={props.disabled}
+          aria-label="repository"
+        />
+        <button type="submit" className="primary" disabled={props.disabled || !value.trim()}>
+          {props.disabled ? "…" : "Audit"}
+        </button>
+      </div>
+      {showToken ? (
+        <div className="tokenfield">
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="read-only token for this repo"
+            disabled={props.disabled}
+            aria-label="repository token"
+          />
+          <p className="fineprint">
+            Stored as a vault on your Fountain, attached to this repository's mender alone — encrypted there, never
+            returned by the API, and never seen by this page again. Give it read access to <b>this repository only</b>:
+            the mender reads untrusted repository content while holding it.
+          </p>
+        </div>
+      ) : (
+        <button type="button" className="linkish" onClick={() => setShowToken(true)} disabled={props.disabled}>
+          private repository? add a read token
+        </button>
+      )}
     </form>
+  );
+}
+
+/** Attaching a token after the fact — a rebuild, so it is its own small form. */
+function AttachToken(props: { onAttach: (token: string) => void; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
+  if (!open)
+    return (
+      <button className="linkish" disabled={props.disabled} onClick={() => setOpen(true)}>
+        private? attach a token
+      </button>
+    );
+  return (
+    <span className="attach">
+      <input
+        type="password"
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && token.trim() && props.onAttach(token.trim())}
+        placeholder="read-only token"
+        aria-label="repository token"
+      />
+      <button className="primary" disabled={props.disabled || !token.trim()} onClick={() => props.onAttach(token.trim())}>
+        Attach
+      </button>
+      <button className="linkish" onClick={() => setOpen(false)}>
+        cancel
+      </button>
+    </span>
   );
 }
 

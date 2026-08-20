@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileUrl, parseRefKey, parseRepoInput, refKey, refLabel, cloneUrl } from "./hosts";
+import { authedCloneUrl, fileUrl, parseRefKey, parseRepoInput, refKey, refLabel, cloneUrl } from "./hosts";
 
 describe("parseRepoInput", () => {
   test("owner/name defaults to github", () => {
@@ -47,6 +47,12 @@ describe("keys and labels", () => {
 
   test("clone URL", () => {
     expect(cloneUrl({ host: "github.com", owner: "o", name: "r" })).toBe("https://github.com/o/r.git");
+  });
+
+  test("authenticated clone URL uses each host's expected username, never the token itself", () => {
+    expect(authedCloneUrl({ host: "github.com", owner: "o", name: "r" })).toBe("https://x-access-token:$GITHUB_TOKEN@github.com/o/r.git");
+    expect(authedCloneUrl({ host: "gitlab.com", owner: "g", name: "p" })).toBe("https://oauth2:$GITHUB_TOKEN@gitlab.com/g/p.git");
+    expect(authedCloneUrl({ host: "codeberg.org", owner: "g", name: "p" })).toBe("https://token:$GITHUB_TOKEN@codeberg.org/g/p.git");
   });
 });
 

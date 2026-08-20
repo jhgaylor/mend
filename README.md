@@ -58,8 +58,9 @@ bun run dev        # http://localhost:5180
 
 On first load, enter your Fountain URL and **Sign in with Fountain** (OAuth
 code + PKCE; the token is an API key), or paste an API key. Then name a repo —
-`owner/name`, or a URL on `github.com`, `gitlab.com` or `codeberg.org`, public
-repos only. The app hires one mender per repo (an agent named
+`owner/name`, or a URL on `github.com`, `gitlab.com` or `codeberg.org` —
+public, or private with a read token (see below). The app hires one mender per
+repo (an agent named
 `Mend: host/owner/name`, added to your team), sends it off to audit, and
 remembers the pairing per Fountain URL in this browser.
 
@@ -86,8 +87,35 @@ environment cannot be created the mender still works — the prompt falls back t
 an `npx -p …` invocation of the same packages.
 
 Nothing else belongs in that environment — in particular **no GitHub token**.
-Menders clone over anonymous https and never push. The pull request is opened by
-the app, from your browser, with your own credential (see below).
+A credential shared by every mender is exactly what you do not want; the two
+tokens Mend can use are both narrower than that, and neither lives here:
+
+| credential | where it lives | what it is for |
+|---|---|---|
+| a repo's read token | a **vault**, attached to that one repo's mender | cloning a private repository |
+| your GitHub token | your browser (`mend.github`) | opening the pull request, as you |
+
+## Private repositories
+
+Tick *"private repository? add a read token"* when adding a repo and Mend puts
+that token in a Fountain **vault** named after the repo, then attaches the vault
+to that mender's conversation — Fountain merges vault values over environment
+ones, and a vault binds to a single conversation. So the credential's blast
+radius is one repository and one agent.
+
+That boundary is the point rather than tidiness: the mender reads untrusted
+repository content while holding the token, so **scope it to that repository
+only**. It needs read access and nothing more — the mender never pushes.
+
+Two consequences worth knowing:
+
+- **A vault can only be bound when the teammate is created.** Attaching a token
+  to a repo you have already added rebuilds the mender, which starts a fresh
+  thread; the old conversation is kept in Fountain but leaves the view. The app
+  says so before it does it.
+- **The pull request is a separate credential.** It is opened from your browser
+  with your own token, so for a private repo that token needs access too —
+  `repo` scope rather than `public_repo`.
 
 ## How it works: the mend protocol
 
@@ -158,7 +186,7 @@ The agent never opens PRs and never pushes. The app does it, in the browser:
 1. **Tick the fixes** you want. Every applied/proposed fix has an *add to PR*
    box; skipped ones cannot be ticked (nothing was changed for them).
 2. **Connect GitHub** with your own personal access token (`public_repo`
-   scope), stored in this browser under `mend.github`. It is deliberately not a
+   scope, or `repo` for a private repository), stored in this browser under `mend.github`. It is deliberately not a
    shared token — Mend is a public page, so anything the app could read, every
    visitor could read. The PR is authored by you, from a credential you revoke.
 3. **Draft the description.** The app asks the mender to write a title and body

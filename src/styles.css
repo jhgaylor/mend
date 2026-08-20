@@ -295,3 +295,14 @@ a code { color: inherit; }
 .ruleset.spoke { border-color: var(--brand); }
 .hero-card h1 b { color: var(--brand); font-weight: 700; }
 .hero-card p + p { margin-top: 2px; }
+
+/* ── private repositories ────────────────────────────────────────────────── */
+.addrepo { flex-direction: column; align-items: stretch; gap: 6px; }
+.addrepo-row { display: flex; gap: 6px; }
+.addrepo-row input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; }
+.addrepo.big .addrepo-row input { font-size: 14px; padding: 10px 12px; }
+.tokenfield { display: flex; flex-direction: column; gap: 6px; }
+.tokenfield input { font-family: var(--mono); font-size: 12.5px; }
+.private { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; cursor: help; }
+.attach { display: inline-flex; gap: 6px; align-items: center; }
+.attach input { font-family: var(--mono); font-size: 12px; width: 180px; }

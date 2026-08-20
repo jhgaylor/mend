@@ -35,6 +35,16 @@ export function cloneUrl(r: RepoRef): string {
 }
 
 /**
+ * The clone URL with a token in it, for a private repository. Each host wants
+ * a different username in front of the token; the token itself is left as the
+ * shell variable so it is never written into a prompt, a log or a reply.
+ */
+export function authedCloneUrl(r: RepoRef, tokenVar = "$GITHUB_TOKEN"): string {
+  const user = r.host === "gitlab.com" ? "oauth2" : r.host === "codeberg.org" ? "token" : "x-access-token";
+  return `https://${user}:${tokenVar}@${refKey(r)}.git`;
+}
+
+/**
  * `owner/name` (GitHub), `host/owner/name`, or a full https URL on one of
  * the three hosts (with or without .git / a trailing path) → a RepoRef.
  * Null when it is not recognisably a repo on a supported host.

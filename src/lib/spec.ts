@@ -4,7 +4,7 @@
  * preinstalled, with a system prompt that pins the repo and the protocol.
  * The prompt is the other half of `protocol.ts` — change one, change both.
  */
-import { cloneUrl, parseRefKey, refKey, refLabel, repoUrl, type RepoRef } from "./hosts";
+import { authedCloneUrl, cloneUrl, parseRefKey, refKey, refLabel, repoUrl, type RepoRef } from "./hosts";
 
 export const AGENT_NAME_PREFIX = "Mend: ";
 
@@ -23,6 +23,25 @@ export function agentDescription(ref: RepoRef): string {
 
 /** The environment every mender runs on: chant + the full blacklight lexicon set, on PATH. */
 export const ENVIRONMENT_NAME = "Mend toolkit";
+
+/** The env var a repo's vault carries, when the repo is private. */
+export const TOKEN_KEY = "GITHUB_TOKEN";
+
+/**
+ * One vault per repository, holding only that repo's read token.
+ *
+ * Per-repo rather than one shared credential on the environment, and that is
+ * the point: the mender reads untrusted repository content while holding it,
+ * so its blast radius should be the single repo you pointed it at. Fountain
+ * attaches a vault to one conversation, which is exactly that boundary.
+ */
+export function vaultName(ref: RepoRef): string {
+  return `Mend: ${refKey(ref)}`;
+}
+
+export function vaultDescription(ref: RepoRef): string {
+  return `Read-only ${TOKEN_KEY} for ${refLabel(ref)}, used by its mender to clone. Scope it to this repository only.`;
+}
 
 export const CHANT_PACKAGES = [
   "@intentius/chant",
@@ -87,6 +106,7 @@ export function systemPrompt(ref: RepoRef): string {
   const label = refLabel(ref);
   const url = repoUrl(ref);
   const clone = cloneUrl(ref);
+  const authed = authedCloneUrl(ref, `$${TOKEN_KEY}`);
   return `You are Mend for ${label} (${url}), a public repository. You run on a real computer with git, jq, a shell, and the chant CLI (\`chant\`) with every audit lexicon installed. You are driven by an app that parses machine-readable fenced blocks out of your replies, so follow the protocol below exactly.
 
 chant audit is the engine behind blacklight (https://blacklight.intentius.io): it reads CI workflows (GitHub Actions, GitLab CI, Forgejo), Kubernetes manifests, Dockerfiles and Compose files, Helm charts, CloudFormation, ARM and Config Connector templates, and runs a few hundred security and correctness checks. Findings come in tiers: merge-worthy + deterministic (quick wins — mechanical fixes), merge-worthy + guidance (needs review — a judgement call), and report-only (hygiene). Every rule is documented at https://intentius.io/chant/lint-rules/audit-rules/#<id-lowercase>.
@@ -95,12 +115,15 @@ chant audit is the engine behind blacklight (https://blacklight.intentius.io): i
 
 Work in ~/work/repo. When asked to audit:
 
-1. Check the repository exists and find the default branch: \`git ls-remote --symref ${clone} HEAD\`. If this fails, the repository does not exist or is private (you can only reach public repos, anonymously). Say which in one or two sentences and STOP — no audit-report block.
-2. Clone shallow: \`rm -rf ~/work/repo && git clone --depth 1 ${clone} ~/work/repo\`. Never use credentials for the clone.
-3. Run the audit from the repo root, both formats (the JSON is the structured report; the Markdown carries the ready-made quick-win diffs you will apply later):
+1. Work out how to reach it. If the environment variable \`$${TOKEN_KEY}\` is set, this repository is private and that token is its read credential — use \`${authed}\` as the remote. If it is not set, use \`${clone}\` and expect a public repository.
+2. Check it exists and find the default branch: \`git ls-remote --symref <that remote> HEAD\`. If this fails: the repository does not exist, or it is private and you have no token, or the token cannot see it. Say which in one or two sentences and STOP — no audit-report block.
+3. Clone shallow: \`rm -rf ~/work/repo && git clone --depth 1 <that remote> ~/work/repo\`.
+
+   The token is a credential in a URL, so treat it as one: never print it, never echo a command with it expanded, never write it into a file inside the clone, and never send it anywhere but this repository's git remote. Refer to it only as \`$${TOKEN_KEY}\`, and if you show one of these commands in a reply, leave the variable unexpanded.
+4. Run the audit from the repo root, both formats (the JSON is the structured report; the Markdown carries the ready-made quick-win diffs you will apply later):
    \`cd ~/work/repo && chant audit . --format json -o /tmp/audit.json && chant audit . --format markdown -o /tmp/audit.md\`
    If \`chant\` is not on PATH, use \`${NPX_CHANT}\` in its place (slower; the packages download once).
-4. Build the report block by running exactly this and pasting its output verbatim as the only content of the fence (do not retype or reformat it):
+5. Build the report block by running exactly this and pasting its output verbatim as the only content of the fence (do not retype or reformat it):
 
    \`\`\`
    cd ~/work/repo && jq -c --arg branch "$(git rev-parse --abbrev-ref HEAD)" --arg commit "$(git rev-parse HEAD)" '
@@ -112,7 +135,7 @@ Work in ~/work/repo. When asked to audit:
    ' /tmp/audit.json
    \`\`\`
 
-5. End that reply with exactly one audit-report block wrapping that output — valid JSON, one object, nothing else inside the fence:
+6. End that reply with exactly one audit-report block wrapping that output — valid JSON, one object, nothing else inside the fence:
 
 \`\`\`audit-report
 {"branch":"main","commit":"…","summary":{"total":0,"quickWin":0,"needsReview":0,"reportOnly":0,"errors":0,"warnings":0,"infos":0,"security":0,"correctness":0,"bestPractice":0},"scanned":0,"findings":[],"omitted":0}
@@ -176,7 +199,7 @@ A \`chant audit\` flagged 7 merge-worthy findings; this covers the two you picke
 
 ## Rules
 
-- Public repos over anonymous https only for cloning; never use credentials for anything.
+- Clone over https only — anonymously, or with the vault's token when the repository is private. Never push, and never use that token for anything but cloning and fetching this one repository.
 - Every rule id you cite must come from the audit; never invent findings or fixes.
 - Outside the blocks be brief and concrete. The blocks are the deliverable; the prose is the summary.`;
 }

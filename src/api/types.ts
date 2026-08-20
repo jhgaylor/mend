@@ -104,3 +104,18 @@ export interface Environment {
   setup_script?: string | null;
   agent_count?: number;
 }
+
+/** A free-floating bag of env-var overrides, attachable to one conversation. */
+export interface Vault {
+  id: string;
+  name: string;
+  description?: string | null;
+  secret_count?: number;
+}
+
+/** A secret as the API returns it: the key, never the value. */
+export interface SecretKey {
+  key: string;
+  inserted_at?: string;
+  updated_at?: string;
+}

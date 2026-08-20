@@ -3,7 +3,7 @@
  * bearer key; every error is an `ApiError` with the server's `error` string
  * when there was one. Ported (slimmed) from jhgaylor/repo-sage / dns-desk.
  */
-import type { Agent, Catalog, Environment, LogEvent, Me, Teammate, Turn } from "./types";
+import type { Agent, Catalog, Environment, LogEvent, Me, SecretKey, Teammate, Turn, Vault } from "./types";
 import { readSse, type SseMessage } from "../lib/sse";
 import type { Settings } from "../lib/settings";
 
@@ -36,7 +36,8 @@ export class FountainClient {
     return (await this.json<{ data: Teammate[] }>("GET", "/api/team")).data;
   }
 
-  async addTeammate(input: { agent_id: string; name?: string; environment_id?: string }): Promise<Teammate> {
+  /** `vault_id` can only be set here — Fountain has no way to attach one later. */
+  async addTeammate(input: { agent_id: string; name?: string; environment_id?: string; vault_id?: string }): Promise<Teammate> {
     return (await this.json<{ data: Teammate }>("POST", "/api/team", input)).data;
   }
 
@@ -89,6 +90,25 @@ export class FountainClient {
     setup_script?: string;
   }): Promise<Environment> {
     return this.json<{ data: Environment }>("POST", "/api/environments", input).then((r) => r.data);
+  }
+
+  // ── vaults: a per-repo credential, attached to one conversation ───────────
+
+  async listVaults(): Promise<Vault[]> {
+    return (await this.json<{ data: Vault[] }>("GET", "/api/vaults")).data;
+  }
+
+  async createVault(input: { name: string; description?: string }): Promise<Vault> {
+    return (await this.json<{ data: Vault }>("POST", "/api/vaults", input)).data;
+  }
+
+  /** Keys and timestamps only — the API never returns a secret's value. */
+  async listVaultSecretKeys(vaultId: string): Promise<SecretKey[]> {
+    return (await this.json<{ data: SecretKey[] }>("GET", `/api/vaults/${vaultId}/secrets`)).data;
+  }
+
+  putVaultSecret(vaultId: string, key: string, value: string): Promise<unknown> {
+    return this.json("POST", `/api/vaults/${vaultId}/secrets`, { key, value });
   }
 
   async listAgents(search?: string): Promise<Agent[]> {
