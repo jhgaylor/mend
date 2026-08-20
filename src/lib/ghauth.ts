@@ -12,6 +12,8 @@ export interface GhAuth {
   token: string;
   login: string;
   avatarUrl?: string;
+  /** How it was obtained — an App sign-in can be renewed by signing in again. */
+  via?: "paste" | "app";
 }
 
 export function loadGhAuth(): GhAuth | null {
@@ -22,6 +24,7 @@ export function loadGhAuth(): GhAuth | null {
     if (typeof parsed.token !== "string" || typeof parsed.login !== "string") return null;
     const auth: GhAuth = { token: parsed.token, login: parsed.login };
     if (typeof parsed.avatarUrl === "string") auth.avatarUrl = parsed.avatarUrl;
+    if (parsed.via === "app" || parsed.via === "paste") auth.via = parsed.via;
     return auth;
   } catch {
     return null;

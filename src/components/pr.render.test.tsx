@@ -3,6 +3,9 @@ import { renderToString } from "react-dom/server";
 import { foldThread, selectableFixes } from "../lib/protocol";
 import { Plan, type Selection } from "./Plan";
 import { PrPanel } from "./PrPanel";
+import type { AppInfo } from "../lib/ghoauth";
+
+const APP: AppInfo = { configured: true, slug: "fountain-rounds", clientId: "Iv23lib", installUrl: "https://github.com/apps/fountain-rounds/installations/new" };
 
 // Render smoke for the pull-request flow: which fixes can be ticked, and the
 // three states of the panel (connect → draft → open).
@@ -72,25 +75,38 @@ describe("Plan selection", () => {
 describe("PrPanel — the two tokens", () => {
   test("with no connection, says what this token is and is not for", () => {
     const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} />);
-    expect(html).toContain("the mender never sees it");
+    expect(html).toContain("the mender never sees the credential");
   });
 
   test("when the repo clones anonymously it says a private one needs its own token", () => {
     const html = renderToString(
       <PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} clonesWithOwnToken={false} />,
     );
-    // the explanation only renders once a token is connected, so this asserts the
-    // un-connected copy instead — the connected branch is covered in the browser.
-    expect(html).toContain("your own GitHub token");
+    expect(html).toContain("authored by your account");
   });
 });
 
 describe("PrPanel", () => {
-  test("asks for a token before it can open anything", () => {
+  test("asks for a credential before it can open anything", () => {
     const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} />);
-    expect(html).toContain("your own GitHub token");
+    expect(html).toContain("authored by your account");
     expect(html).toContain("public_repo");
     expect(html).toContain("Connect");
+  });
+
+  test("with no App configured there is no sign-in button, only the paste path", () => {
+    const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} appInfo={{ configured: false, slug: null, clientId: null, installUrl: null }} />);
+    expect(html).not.toContain("Sign in with GitHub");
+    expect(html).toContain("Connect");
+  });
+
+  test("with an App configured it leads with sign-in, and still allows a pasted token", () => {
+    const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} appInfo={APP} />);
+    expect(html).toContain("Sign in with GitHub");
+    expect(html).toContain("fountain-rounds");
+    expect(html).toContain(".github/workflows");
+    expect(html).toContain("Or paste a token");
+    expect(html).toContain("installations/new");
   });
 
   test("before a draft exists, the action is to ask the agent for one", () => {

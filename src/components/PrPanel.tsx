@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { buildChanges, mergePatches, PatchError } from "../lib/apply";
 import { branchName, getViewer, GhError, openPullRequest, readFile, type OpenPrResult } from "../lib/gh";
 import { clearGhAuth, loadGhAuth, saveGhAuth, TOKEN_URL, type GhAuth } from "../lib/ghauth";
+import { beginGithubLogin, type AppInfo } from "../lib/ghoauth";
 import { refLabel, type RepoRef } from "../lib/hosts";
 import type { Fix, PrDraft } from "../lib/protocol";
 
@@ -27,6 +28,8 @@ export function PrPanel(props: {
   onAuthChange?: (auth: GhAuth | null) => void;
   /** Whether this repo's mender already has its own clone token. */
   clonesWithOwnToken?: boolean;
+  /** The deployment's GitHub App, when it has one — enables signing in. */
+  appInfo?: AppInfo | null;
 }) {
   const { repo, selected, draft } = props;
   const [auth, setAuth] = useState<GhAuth | null>(() => loadGhAuth());
@@ -148,6 +151,7 @@ export function PrPanel(props: {
             {auth.avatarUrl && <img src={auth.avatarUrl} alt="" width={20} height={20} />}
             <span>
               Opening as <b>{auth.login}</b>
+              {auth.via === "app" && <span className="viabadge">via {props.appInfo?.slug ?? "the GitHub App"}</span>}
             </span>
             <button className="linkish" onClick={disconnect}>
               disconnect
@@ -163,12 +167,31 @@ export function PrPanel(props: {
       ) : (
         <div className="ghconnect">
           <p className="fineprint">
-            The app opens the PR from your browser with your own GitHub token — nothing is stored on a server, the
-            mender never sees it, and the pull request is authored by you.{" "}
+            The app opens the PR from your browser as you — nothing is stored on a server, the mender never sees the
+            credential, and the pull request is authored by your account.
+          </p>
+          {props.appInfo?.configured && props.appInfo.clientId && (
+            <div className="signin">
+              <button className="primary" onClick={() => beginGithubLogin(props.appInfo!.clientId!)}>
+                Sign in with GitHub
+              </button>
+              <span className="fineprint">
+                Uses the{" "}
+                <a href={props.appInfo.installUrl ?? "#"} target="_blank" rel="noreferrer">
+                  {props.appInfo.slug}
+                </a>{" "}
+                app, which can edit <code>.github/workflows</code> — where most of chant's findings are. Install it on a
+                repository first if you have not.
+              </span>
+            </div>
+          )}
+          <p className="fineprint">
+            {props.appInfo?.configured ? "Or paste a token — " : ""}
             <a href={TOKEN_URL} target="_blank" rel="noreferrer">
-              Create one
+              create one
             </a>{" "}
-            with the <code>public_repo</code> scope.
+            with the <code>public_repo</code> scope (<code>repo</code> for a private repository, plus{" "}
+            <code>workflow</code> to let it touch <code>.github/workflows</code>).
           </p>
           <div className="ghconnect-row">
             <input

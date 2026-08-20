@@ -10,7 +10,8 @@ import { ApiError, describeError, FountainClient } from "./api/client";
 import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import { parseRepoInput, refKey, refLabel, repoUrl, type RepoRef } from "./lib/hosts";
-import { loadGhAuth, type GhAuth } from "./lib/ghauth";
+import { loadGhAuth, saveGhAuth, type GhAuth } from "./lib/ghauth";
+import { completeGithubLoginIfCallback, fetchAppInfo, isGithubCallback, type AppInfo } from "./lib/ghoauth";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { foldThread, selectableFixes, stripBlocks } from "./lib/protocol";
 import { loadSelected, reconcileRepos, saveRepo, saveSelected } from "./lib/repos";
@@ -65,6 +66,7 @@ export function App() {
   const [picked, setPicked] = useState<Set<number> | null>(null);
   /** The GitHub token connected for pull requests, if any — offered for cloning too. */
   const [ghAuth, setGhAuth] = useState<GhAuth | null>(() => loadGhAuth());
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   const client = useMemo(() => (settings ? new FountainClient(settings) : null), [settings]);
   const catalogRef = useRef<Catalog | null>(null);
@@ -77,7 +79,26 @@ export function App() {
   // ── boot: OAuth callback, stored settings ─────────────────────────────────
 
   useEffect(() => {
+    void fetchAppInfo().then(setAppInfo);
+  }, []);
+
+  useEffect(() => {
     void (async () => {
+      // Both OAuth flows land here as ?code=…; each only claims a callback
+      // whose state it stashed, so this cannot swallow Fountain's.
+      if (isGithubCallback()) {
+        try {
+          const gh = await completeGithubLoginIfCallback();
+          if (gh) {
+            const auth: GhAuth = { token: gh.token, login: gh.login, via: "app" };
+            saveGhAuth(auth);
+            setGhAuth(auth);
+            say(`Signed in to GitHub as ${gh.login}.`);
+          }
+        } catch (err) {
+          say(err instanceof Error ? err.message : String(err));
+        }
+      }
       try {
         const cb = await completeLoginIfCallback();
         if (cb) {
@@ -93,7 +114,7 @@ export function App() {
       if (stored) setSettings(stored);
       else setPhase("connect");
     })();
-  }, []);
+  }, [say]);
 
   useEffect(() => {
     if (!settings) return;
@@ -677,6 +698,7 @@ export function App() {
                   onRequestDraft={() => agentId && void drive(agentId, prDraftPrompt(pickedFixes), 1)}
                   onAuthChange={setGhAuth}
                   clonesWithOwnToken={current.teammate.conversation.vault_id !== null}
+                  appInfo={appInfo}
                 />
               )}
 

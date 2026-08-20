@@ -310,3 +310,5 @@ a code { color: inherit; }
 .reuse input { accent-color: var(--brand); margin: 2px 0 0; flex-shrink: 0; }
 .twotoken { border-left: 2px solid var(--border); padding-left: 10px; }
 .status-card .hint { margin-top: 8px; color: var(--text); }
+.signin { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.viabadge { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
