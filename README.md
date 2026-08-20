@@ -90,10 +90,21 @@ Nothing else belongs in that environment — in particular **no GitHub token**.
 A credential shared by every mender is exactly what you do not want; the two
 tokens Mend can use are both narrower than that, and neither lives here:
 
-| credential | where it lives | what it is for |
-|---|---|---|
-| a repo's read token | a **vault**, attached to that one repo's mender | cloning a private repository |
-| your GitHub token | your browser (`mend.github`) | opening the pull request, as you |
+| credential | where it lives | what it is for | wants |
+|---|---|---|---|
+| a repo's clone token | a **vault**, bound to that one repo's mender | cloning a private repository | **read**, that repo only |
+| your GitHub token | your browser (`mend.github`) | opening the pull request, as you | **write** (`repo`) |
+
+They are deliberately separate and never fall back to each other, because they
+want opposite things. The clone token is held by an agent that reads untrusted
+repository content, so it should be read-only; the pull-request token has to be
+able to write, so it stays in your browser and never reaches the sandbox.
+
+The app will offer to reuse your connected pull-request token as the clone token
+— one paste instead of two — and tells you what you are trading when you accept:
+an agent reading untrusted files ends up holding push rights. A read-only token
+scoped to the one repository is the better answer if you can be bothered to mint
+one.
 
 ## Private repositories
 

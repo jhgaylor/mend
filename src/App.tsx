@@ -10,6 +10,7 @@ import { ApiError, describeError, FountainClient } from "./api/client";
 import type { Catalog, LogEvent, TeamEvent, Teammate, Turn } from "./api/types";
 import { blocksForTurn } from "./lib/acp";
 import { parseRepoInput, refKey, refLabel, repoUrl, type RepoRef } from "./lib/hosts";
+import { loadGhAuth, type GhAuth } from "./lib/ghauth";
 import { completeLoginIfCallback, revoke } from "./lib/oauth";
 import { foldThread, selectableFixes, stripBlocks } from "./lib/protocol";
 import { loadSelected, reconcileRepos, saveRepo, saveSelected } from "./lib/repos";
@@ -62,6 +63,8 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   /** Fix ids ticked for the pull request; null means "everything selectable". */
   const [picked, setPicked] = useState<Set<number> | null>(null);
+  /** The GitHub token connected for pull requests, if any — offered for cloning too. */
+  const [ghAuth, setGhAuth] = useState<GhAuth | null>(() => loadGhAuth());
 
   const client = useMemo(() => (settings ? new FountainClient(settings) : null), [settings]);
   const catalogRef = useRef<Catalog | null>(null);
@@ -548,7 +551,7 @@ export function App() {
           )}
           {team !== null && menders.length === 0 && !pendingKey && <p className="fineprint">No repos yet.</p>}
         </nav>
-        <AddRepoForm disabled={adding !== null} onAdd={(v, t) => void addRepo(v, t)} />
+        <AddRepoForm disabled={adding !== null} connected={ghAuth} onAdd={(v, t) => void addRepo(v, t)} />
         <div className="rail-foot">
           <span className={connected ? "dot on" : "dot"} title={connected ? "live" : "reconnecting"} />
           <button className="linkish" onClick={signOut}>
@@ -576,7 +579,7 @@ export function App() {
                   private · token attached
                 </span>
               ) : (
-                <AttachToken disabled={busy || working} onAttach={(t) => void attachToken(current, t)} />
+                <AttachToken disabled={busy || working} connected={ghAuth} onAttach={(t) => void attachToken(current, t)} />
               )}
               {view.report && (
                 <button className="linkish" disabled={!canDrive} onClick={() => agentId && void drive(agentId, AUDIT_PROMPT)}>
@@ -601,6 +604,15 @@ export function App() {
               {auditFailed && (
                 <div className="status-card failed">
                   <p>{lastProse(thread) || "The mender could not audit this repository."}</p>
+                  {!current.teammate.conversation.vault_id && (
+                    <p className="hint">
+                      If <code>{refLabel(current.ref)}</code> is private, that is why: this mender has no token, so it
+                      cloned anonymously.{" "}
+                      {ghAuth
+                        ? `The GitHub token you connected for pull requests (${ghAuth.login}) can clone it too.`
+                        : "Attach a read-only token scoped to this repository."}
+                    </p>
+                  )}
                   <div className="status-actions">
                     <button className="primary" disabled={!canDrive} onClick={() => agentId && void drive(agentId, AUDIT_PROMPT)}>
                       Retry
@@ -608,6 +620,13 @@ export function App() {
                     <button className="danger" disabled={busy} onClick={() => void retire(current)}>
                       Remove
                     </button>
+                    {!current.teammate.conversation.vault_id && (
+                      <AttachToken
+                        disabled={busy || working}
+                        connected={ghAuth}
+                        onAttach={(t) => void attachToken(current, t)}
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -656,6 +675,8 @@ export function App() {
                   draft={view.draft}
                   agentBusy={busy || working}
                   onRequestDraft={() => agentId && void drive(agentId, prDraftPrompt(pickedFixes), 1)}
+                  onAuthChange={setGhAuth}
+                  clonesWithOwnToken={current.teammate.conversation.vault_id !== null}
                 />
               )}
 
@@ -701,7 +722,7 @@ export function App() {
                 the report stops being a list: it applies the mechanical fixes, reasons through the judgement calls,
                 says plainly which ones need a human — and hands you a patch, or opens the pull request.
               </p>
-              <AddRepoForm big disabled={adding !== null} onAdd={(v, t) => void addRepo(v, t)} />
+              <AddRepoForm big disabled={adding !== null} connected={ghAuth} onAdd={(v, t) => void addRepo(v, t)} />
               {pendingKey && (
                 <p className="fineprint">
                   Hiring a mender for <code>{pendingKey}</code>…
@@ -721,17 +742,23 @@ export function App() {
   );
 }
 
-function AddRepoForm(props: { onAdd: (value: string, token?: string) => void; disabled: boolean; big?: boolean }) {
+export function AddRepoForm(props: {
+  onAdd: (value: string, token?: string) => void;
+  disabled: boolean;
+  connected?: GhAuth | null;
+  big?: boolean;
+}) {
   const [value, setValue] = useState("");
   const [token, setToken] = useState("");
-  const [showToken, setShowToken] = useState(false);
+  const [mode, setMode] = useState<"none" | "connected" | "paste">("none");
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!value.trim()) return;
-    props.onAdd(value, token.trim() || undefined);
+    const supplied = mode === "connected" ? props.connected?.token : mode === "paste" ? token.trim() || undefined : undefined;
+    props.onAdd(value, supplied);
     setValue("");
     setToken("");
-    setShowToken(false);
+    setMode("none");
   };
   return (
     <form className={props.big ? "addrepo big" : "addrepo"} onSubmit={submit}>
@@ -747,33 +774,56 @@ function AddRepoForm(props: { onAdd: (value: string, token?: string) => void; di
           {props.disabled ? "…" : "Audit"}
         </button>
       </div>
-      {showToken ? (
-        <div className="tokenfield">
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="read-only token for this repo"
-            disabled={props.disabled}
-            aria-label="repository token"
-          />
-          <p className="fineprint">
-            Stored as a vault on your Fountain, attached to this repository's mender alone — encrypted there, never
-            returned by the API, and never seen by this page again. Give it read access to <b>this repository only</b>:
-            the mender reads untrusted repository content while holding it.
-          </p>
-        </div>
-      ) : (
-        <button type="button" className="linkish" onClick={() => setShowToken(true)} disabled={props.disabled}>
-          private repository? add a read token
+      {mode === "none" ? (
+        <button type="button" className="linkish" onClick={() => setMode(props.connected ? "connected" : "paste")} disabled={props.disabled}>
+          private repository? give the mender a token
         </button>
+      ) : (
+        <div className="tokenfield">
+          {props.connected && (
+            <label className="reuse">
+              <input type="checkbox" checked={mode === "connected"} onChange={(e) => setMode(e.target.checked ? "connected" : "paste")} />
+              <span>
+                Clone with the GitHub token you already connected (<b>{props.connected.login}</b>) — no second paste.
+              </span>
+            </label>
+          )}
+          {mode === "paste" && (
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="read-only token for this repo"
+              disabled={props.disabled}
+              aria-label="repository token"
+            />
+          )}
+          <p className="fineprint">
+            {mode === "connected" ? (
+              <>
+                That token can write — it is the one that opens your pull requests. Handing it to the mender means an
+                agent reading untrusted repository content holds push rights. Safer, if you can be bothered: paste a{" "}
+                <b>read-only</b> token scoped to this repository instead.
+              </>
+            ) : (
+              <>
+                Stored as a vault on your Fountain, attached to this repository's mender alone — encrypted there, never
+                returned by the API, never seen by this page again. Read access to <b>this repository only</b> is all
+                the mender needs; it never pushes.
+              </>
+            )}
+          </p>
+          <button type="button" className="linkish" onClick={() => setMode("none")} disabled={props.disabled}>
+            cancel
+          </button>
+        </div>
       )}
     </form>
   );
 }
 
 /** Attaching a token after the fact — a rebuild, so it is its own small form. */
-function AttachToken(props: { onAttach: (token: string) => void; disabled: boolean }) {
+export function AttachToken(props: { onAttach: (token: string) => void; disabled: boolean; connected?: GhAuth | null }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
   if (!open)
@@ -784,12 +834,22 @@ function AttachToken(props: { onAttach: (token: string) => void; disabled: boole
     );
   return (
     <span className="attach">
+      {props.connected && (
+        <button
+          className="primary"
+          disabled={props.disabled}
+          title={`Reuse the token connected for pull requests (${props.connected.login}). It can write — a read-only one is safer.`}
+          onClick={() => props.onAttach(props.connected!.token)}
+        >
+          Use {props.connected.login}'s token
+        </button>
+      )}
       <input
         type="password"
         value={token}
         onChange={(e) => setToken(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && token.trim() && props.onAttach(token.trim())}
-        placeholder="read-only token"
+        placeholder="or a read-only token"
         aria-label="repository token"
       />
       <button className="primary" disabled={props.disabled || !token.trim()} onClick={() => props.onAttach(token.trim())}>

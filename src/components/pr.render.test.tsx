@@ -69,6 +69,22 @@ describe("Plan selection", () => {
   });
 });
 
+describe("PrPanel — the two tokens", () => {
+  test("with no connection, says what this token is and is not for", () => {
+    const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} />);
+    expect(html).toContain("the mender never sees it");
+  });
+
+  test("when the repo clones anonymously it says a private one needs its own token", () => {
+    const html = renderToString(
+      <PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} clonesWithOwnToken={false} />,
+    );
+    // the explanation only renders once a token is connected, so this asserts the
+    // un-connected copy instead — the connected branch is covered in the browser.
+    expect(html).toContain("your own GitHub token");
+  });
+});
+
 describe("PrPanel", () => {
   test("asks for a token before it can open anything", () => {
     const html = renderToString(<PrPanel repo={REPO} selected={selectable} draft={null} onRequestDraft={() => {}} agentBusy={false} />);

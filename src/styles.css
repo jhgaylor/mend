@@ -306,3 +306,7 @@ a code { color: inherit; }
 .private { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; cursor: help; }
 .attach { display: inline-flex; gap: 6px; align-items: center; }
 .attach input { font-family: var(--mono); font-size: 12px; width: 180px; }
+.reuse { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.reuse input { accent-color: var(--brand); margin: 2px 0 0; flex-shrink: 0; }
+.twotoken { border-left: 2px solid var(--border); padding-left: 10px; }
+.status-card .hint { margin-top: 8px; color: var(--text); }

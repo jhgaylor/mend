@@ -23,6 +23,10 @@ export function PrPanel(props: {
   onRequestDraft: () => void;
   /** True while the agent is working (drafting, or anything else). */
   agentBusy: boolean;
+  /** Tells the app when this token appears or goes away, so it can offer it for cloning. */
+  onAuthChange?: (auth: GhAuth | null) => void;
+  /** Whether this repo's mender already has its own clone token. */
+  clonesWithOwnToken?: boolean;
 }) {
   const { repo, selected, draft } = props;
   const [auth, setAuth] = useState<GhAuth | null>(() => loadGhAuth());
@@ -68,6 +72,7 @@ export function PrPanel(props: {
       if (viewer.avatarUrl) next.avatarUrl = viewer.avatarUrl;
       saveGhAuth(next);
       setAuth(next);
+      props.onAuthChange?.(next);
       setTokenInput("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -79,6 +84,7 @@ export function PrPanel(props: {
   const disconnect = () => {
     clearGhAuth();
     setAuth(null);
+    props.onAuthChange?.(null);
   };
 
   const open = async () => {
@@ -137,20 +143,28 @@ export function PrPanel(props: {
 
       {/* 1 — who opens it */}
       {auth ? (
-        <div className="ghwho">
-          {auth.avatarUrl && <img src={auth.avatarUrl} alt="" width={20} height={20} />}
-          <span>
-            Opening as <b>{auth.login}</b>
-          </span>
-          <button className="linkish" onClick={disconnect}>
-            disconnect
-          </button>
-        </div>
+        <>
+          <div className="ghwho">
+            {auth.avatarUrl && <img src={auth.avatarUrl} alt="" width={20} height={20} />}
+            <span>
+              Opening as <b>{auth.login}</b>
+            </span>
+            <button className="linkish" onClick={disconnect}>
+              disconnect
+            </button>
+          </div>
+          <p className="fineprint twotoken">
+            This token stays in your browser and only ever opens the pull request — the mender never sees it.{" "}
+            {props.clonesWithOwnToken
+              ? "Cloning uses a separate token in this repository's vault."
+              : "Cloning is anonymous, so a private repository needs its own read token on the mender."}
+          </p>
+        </>
       ) : (
         <div className="ghconnect">
           <p className="fineprint">
-            The app opens the PR from your browser with your own GitHub token — nothing is stored on a server, and the
-            pull request is authored by you.{" "}
+            The app opens the PR from your browser with your own GitHub token — nothing is stored on a server, the
+            mender never sees it, and the pull request is authored by you.{" "}
             <a href={TOKEN_URL} target="_blank" rel="noreferrer">
               Create one
             </a>{" "}
