@@ -123,6 +123,26 @@ describe("grants", () => {
   });
 });
 
+describe("loadConfig", () => {
+  test("trims whitespace off every secret — a trailing newline is the classic", () => {
+    const cfg = loadConfig({
+      ...ENV,
+      GITHUB_APP_ID: "123\n",
+      GITHUB_OAUTH_CLIENT_ID: "Iv1.abc\n",
+      GITHUB_OAUTH_CLIENT_SECRET: "supersecret\n",
+      GRANT_SECRET: " sec ",
+      GITHUB_APP_SLUG: "mend-bot\n",
+    });
+    expect(cfg.app).toMatchObject({ appId: "123", clientId: "Iv1.abc", clientSecret: "supersecret" });
+    expect(cfg.grantSecret).toBe("sec");
+    expect(cfg.slug).toBe("mend-bot");
+  });
+
+  test("a value that is only whitespace counts as absent", () => {
+    expect(loadConfig({ ...ENV, GITHUB_OAUTH_CLIENT_SECRET: "   " }).app).toBeNull();
+  });
+});
+
 describe("GET /gh/app", () => {
   test("advertises the app without leaking a secret", async () => {
     const res = await call(routesWith(fakeGitHub()), "/gh/app");

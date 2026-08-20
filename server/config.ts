@@ -19,10 +19,17 @@ export interface Config {
 }
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
-  const appId = env.GITHUB_APP_ID;
+  // Trimmed, every one of them. A secret that reaches an env var through a
+  // file, a copy-paste or a `kubectl create --from-file` almost always brings
+  // a trailing newline with it, and GitHub answers that with "the client_id
+  // and/or client_secret passed are incorrect" — which sends you looking for
+  // the wrong bug entirely. None of these values can legitimately contain
+  // leading or trailing whitespace.
+  const trim = (v: string | undefined) => v?.trim() || undefined;
+  const appId = trim(env.GITHUB_APP_ID);
   const privateKey = normalizeKey(env.GITHUB_APP_PRIVATE_KEY);
-  const clientId = env.GITHUB_OAUTH_CLIENT_ID;
-  const clientSecret = env.GITHUB_OAUTH_CLIENT_SECRET;
+  const clientId = trim(env.GITHUB_OAUTH_CLIENT_ID);
+  const clientSecret = trim(env.GITHUB_OAUTH_CLIENT_SECRET);
 
   const complete = Boolean(appId && privateKey && clientId && clientSecret);
   if (appId && !privateKey) {
@@ -31,11 +38,11 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 
   return {
     app: complete ? { appId: appId!, privateKey: privateKey!, clientId: clientId!, clientSecret: clientSecret! } : null,
-    grantSecret: env.GRANT_SECRET ?? null,
+    grantSecret: trim(env.GRANT_SECRET) ?? null,
     allowedOrigins: (env.ALLOWED_ORIGINS ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
-    slug: env.GITHUB_APP_SLUG ?? null,
+    slug: trim(env.GITHUB_APP_SLUG) ?? null,
   };
 }
