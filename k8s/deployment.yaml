@@ -21,6 +21,13 @@ spec:
           image: ghcr.io/jhgaylor/mend:sha-c795a5c3d3ff8dc27e8c59d2343075944c12cdee
           ports:
             - containerPort: 8080
+          # Everything the GitHub App needs. Optional on purpose: without the
+          # secret the /gh endpoints answer 503 and the app falls back to
+          # pasted tokens, so a missing secret degrades instead of breaking.
+          envFrom:
+            - secretRef:
+                name: mend-github-app
+                optional: true
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 2
@@ -30,5 +37,5 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 20
           resources:
-            requests: { cpu: 20m, memory: 96Mi }
-            limits: { memory: 256Mi }
+            requests: { cpu: 20m, memory: 128Mi }
+            limits: { memory: 320Mi }
